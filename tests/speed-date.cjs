@@ -176,25 +176,83 @@ async function main() {
     t.finish({ p1: 4 });
     assert.deepEqual(Array.from(g.cycleWinners), ['p2']); assert.equal(g.scores.p1, 0); assert.equal(g.scores.p2, 1);
   }
-  // Load only the real takeover function; the rest of core initializes the browser and Firebase.
+  // Exercise real clock tracking and host-change paths without browser/Firebase startup.
   {
     const core = fs.readFileSync(path.join(__dirname, '../shared/core.js'), 'utf8');
-    const takeover = core.slice(core.indexOf('function maybeTakeOver(force) {'), core.indexOf('function afterChange()'));
+    const functions = [
+      core.slice(core.indexOf('function maybeTakeOver(force) {'), core.indexOf('function afterChange()')),
+      core.slice(core.indexOf('function noteSkew(d) {'), core.indexOf('const TIMER_LBL')),
+      core.slice(core.indexOf('function listen(c) {'), core.indexOf('function exitLobby(msg) {')),
+      core.slice(core.indexOf('async function leaveLobby() {'), core.indexOf('async function closeLobby(c) {'))
+    ].join('\n');
+    function client(host, skew, game) {
+      const c = { L: { host: 'old', game, rev: 1 }, ME: host, myName: host, skew, skewHost: 'old',
+        P: { old: {}, new: {} }, code: 'TEST', seenRev: 0, unsubLobby: null, unsubPlayers: null,
+        clone: x => JSON.parse(JSON.stringify(x)), isHost: () => c.L.host === c.ME,
+        piled: () => true, notice() {}, setPresence() {}, dbErr(e) { throw e; }, afterChange() {},
+        savePiles: async () => {}, online: () => true, gone: () => false, byJoined: () => 0,
+        nameOf: pid => pid, exitLobby() {}, writeError(e) { throw e; }, commits: 0,
+        Date: { now: () => 400000 },
+        commit() { c.commits++; c.L.rev++; c.L.updated = c.Date.now(); },
+        db: { doc: () => ({
+          onSnapshot: cb => { c.snapshot = cb; return () => {}; },
+          set: async body => { c.saved = body; }, delete: async () => {}
+        }), collection: () => ({ onSnapshot: () => () => {} }) }
+      };
+      vm.createContext(c); vm.runInContext(functions, c);
+      return c;
+    }
     for (const type of ['cah', 'mp', 'sd']) for (const skew of [-120000, 120000]) {
-      const g = { type, deadline: 500000, startAt: type === 'sd' ? 450000 : 0 }, now = 400000;
-      const c = { L: { host: 'old', game: g }, ME: 'new', myName: 'New', skew, skewHost: 'old',
-        isHost: () => false, notice() {}, commit: () => { c.committed = true; } };
-      vm.createContext(c); vm.runInContext(takeover, c); c.maybeTakeOver(true);
-      assert.equal(g.deadline - now, 500000 - (now - skew));
-      assert.equal(g.startAt, type === 'sd' ? 450000 + skew : 0);
-      assert.equal(c.skew, 0); assert.equal(c.skewHost, 'new'); assert.equal(c.L.host, 'new'); assert.equal(c.committed, true);
+      for (const path of ['takeover', 'voluntary']) {
+        const g = { type, deadline: 500000, startAt: type === 'sd' ? 390000 : 0 };
+        const c = client('new', skew, { ...g });
+        c.listen('TEST');
+        if (path === 'takeover') c.maybeTakeOver(true);
+        else {
+          const old = client('old', 0, { ...g });
+          await old.leaveLobby();
+          assert.equal(old.saved.host, 'new');
+          assert.equal(old.saved.game.deadline, g.deadline); // still in the departing host's clock
+          c.afterChange = () => {
+            assert.equal(c.L.game.deadline, g.deadline + skew); // before any host rules run
+            assert.equal(c.skew, 0); assert.equal(c.commits, 1);
+          };
+          c.snapshot({ exists: true, data: () => old.saved });
+        }
+        assert.equal(c.L.game.deadline - 400000, g.deadline - (400000 - skew));
+        assert.equal(c.L.game.startAt, type === 'sd' ? g.startAt + skew : 0);
+        assert.equal(c.skew, 0); assert.equal(c.skewHost, 'new'); assert.equal(c.L.host, 'new');
+        assert.equal(c.commits, 1);
+        if (type === 'sd') {
+          const t = table();
+          t.c.L.game = { ...c.L.game, count: 8, every: 5, phase: 'reveal', traits: Array(8).fill({}) };
+          t.c.skew = c.skew; t.at(400000 + skew);
+          assert.equal(t.c.sdVisible(t.c.L.game), 3);
+          assert.equal(t.c.sdNextAt(t.c.L.game), 405000 + skew);
+        }
+        // Pending and acknowledged echoes, plus repeated takeover checks, never rebase again.
+        const echo = c.clone(c.L);
+        for (const pending of [true, false]) {
+          c.snapshot({ exists: true, data: () => echo, metadata: { hasPendingWrites: pending } });
+          c.maybeTakeOver(true);
+          assert.equal(c.L.game.deadline, g.deadline + skew);
+          assert.equal(c.L.game.startAt, type === 'sd' ? g.startAt + skew : 0);
+          assert.equal(c.commits, 1);
+        }
+      }
     }
     for (const deadline of [0, null, '500000']) {
-      const c = { L: { game: { deadline } }, ME: 'new', myName: 'New', skew: 123,
-        isHost: () => false, notice() {}, commit() {} };
-      vm.createContext(c); vm.runInContext(takeover, c); c.maybeTakeOver(true);
+      const c = client('new', 123, { deadline });
+      c.maybeTakeOver(true);
       assert.equal(c.L.game.deadline, deadline);
     }
+    // No game and first joining an already-owned lobby require no timestamp conversion.
+    const empty = client('new', 123, null);
+    empty.maybeTakeOver(true); assert.equal(empty.L.game, null);
+    const initial = client('new', 123, null);
+    initial.L = null; initial.listen('TEST');
+    initial.snapshot({ exists: true, data: () => ({ host: 'new', rev: 1, game: { deadline: 500000 } }) });
+    assert.equal(initial.L.game.deadline, 500000); assert.equal(initial.commits, 0);
   }
   console.log('PASS');
 }

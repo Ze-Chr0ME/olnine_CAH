@@ -459,11 +459,13 @@ function listen(c) {
     const d = clone(snap.data());
     /* while hosting, ignore echoes older than what this browser already decided */
     if (L && L.host === ME && d.host === ME && (d.rev || 0) < (L.rev || 0)) return;
-    if (!L || d.rev !== L.rev) noteSkew(d);
+    const becameHost = (!L || d.rev !== L.rev || d.host !== L.host) && noteSkew(d);
     /* the draw piles live in their own document; the host keeps its copy across its own echoes */
     if (d.host === ME && d.game && (d.game.type || "cah") === "cah" && !piled(d.game) && L && L.game && L.game.gid === d.game.gid && piled(L.game)) for (const k of PILES) d.game[k] = L.game[k];
     if (!(snap.metadata && snap.metadata.hasPendingWrites) && (d.rev || 0) !== seenRev) { seenRev = d.rev || 0; setPresence({}); }
-    L = d; afterChange();
+    L = d;
+    if (becameHost) commit();
+    afterChange();
   }, dbErr);
   unsubPlayers = db.collection(`lobbies/${c}/players`).onSnapshot(snap => {
     P = {};
@@ -600,11 +602,8 @@ function maybeTakeOver(force) {
     const next = Object.keys(P).filter(pid => pid !== L.host && online(pid)).sort(byJoined)[0];
     if (next !== ME) return;
   }
-  if (L.game) for (const key of ["deadline", "startAt"]) {
-    if (typeof L.game[key] === "number" && L.game[key] > 0) L.game[key] += skew || 0;
-  }
-  skew = 0; skewHost = ME;
   L.host = ME; L.hostName = myName;
+  noteSkew(L);
   notice("The host left, so you are hosting now.");
   commit();
 }
@@ -685,7 +684,15 @@ function identicon(seed) {
 /* Countdown from the host's deadline, corrected by the best clock offset seen from the host's writes. */
 let skew = null, skewHost = null;
 function noteSkew(d) {
-  if (d.host === ME) { skew = 0; skewHost = ME; return; }
+  if (d.host === ME) {
+    // Every handoff reaches here before the new host clears its old clock offset.
+    const becameHost = !!L && skewHost !== ME;
+    if (becameHost && d.game) for (const key of ["deadline", "startAt"]) {
+      if (typeof d.game[key] === "number" && d.game[key] > 0) d.game[key] += skew || 0;
+    }
+    skew = 0; skewHost = ME;
+    return becameHost;
+  }
   if (skewHost !== d.host) { skew = null; skewHost = d.host; }
   const s = Date.now() - (d.updated || 0);
   if (Math.abs(s) < 3600e3 && (skew == null || s < skew)) skew = s;
