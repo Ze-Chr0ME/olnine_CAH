@@ -623,7 +623,7 @@ function hostTick() {
   const g = L.game;
   if (L.status === "playing" && g) {
     const game = GAMES[g.type || "cah"] || curGame();
-    if (Object.keys(P).filter(present).length < game.min) { L.status = "lobby"; L.game = null; changed = true; }
+    if (!game.ownsMin && Object.keys(P).filter(present).length < game.min) { L.status = "lobby"; L.game = null; changed = true; }
     else changed = game.tick(g) || changed;
   }
   if (changed) commit();

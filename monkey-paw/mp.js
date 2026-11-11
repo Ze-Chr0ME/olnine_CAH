@@ -272,5 +272,5 @@ document.addEventListener("submit", e => {
   if (!mpText(t)) return notice("Write something first.", { error: true });
   (g.phase === "wish" ? mpSendWish : mpSendTwist)(t);
 });
-GAMES.mp = { id: "mp", name: "Monkey Paw", min: 3, defaults: { mpTime: 60 }, check: mpCheck, start: mpStart, tick: mpTick, render: mpRender, clock: mpClock,
+GAMES.mp = { id: "mp", name: "Monkey Paw", min: 3, ownsMin: true, defaults: { mpTime: 60 }, check: mpCheck, start: mpStart, tick: mpTick, render: mpRender, clock: mpClock,
   next: g => mpStartRound(g), skip: g => mpSkipRound(g, "The host skipped this round.") };
