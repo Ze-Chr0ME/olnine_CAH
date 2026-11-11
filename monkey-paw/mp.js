@@ -199,7 +199,10 @@ function mpRender(g) {
   mpHeld = held ? mpChoice : null;
   $("blackCard").innerHTML = phase === "over" ? mpCrown(g) : mpSlip(g, shown, held ? "held" : shown ? "granted" : phase);
   const slip = $("blackCard").querySelector(".mp-slip");
-  if (slip && g.wish && (phase === "twist" || phase === "judge")) { slip.classList.toggle("full", mpWishOpen); slip.dataset.mpFull = ""; slip.title = "Tap to read the whole wish"; }
+  if (slip && g.wish && g.wish.length > 90 && (phase === "twist" || phase === "judge")) {   // phones cut a long wish to 3 lines; this opens it
+    slip.classList.toggle("full", mpWishOpen);
+    slip.insertAdjacentHTML("beforeend", `<button type="button" class="mp-more" data-mp-full aria-expanded="${mpWishOpen}" aria-label="${mpWishOpen ? "Shorten the wish" : "Read the whole wish"}" data-tip="${mpWishOpen ? "Shorten" : "Read it all"}">${ICONS.chev}</button>`);
+  }
 
   let status;
   if (role === "spectator" && !["result", "over"].includes(phase)) status = `<b class="cue">Watching.</b> You're in from the next wish.`;
@@ -247,7 +250,7 @@ function mpRender(g) {
     } else idle = true;
   } else {
     title = phase === "judge" ? "The twists" : "Who wrote what";
-    hint = canPick ? (picked ? "Kept. The paw is granting it." : "Tap the one you'd hate most, then keep it.") : phase === "judge" ? `Anonymous until @${nameOf(w)} chooses.` : "";
+    hint = canPick ? (picked ? "Kept. The paw is granting it." : "Tap one, then keep it.") : phase === "judge" ? `Anonymous until @${nameOf(w)} chooses.` : "";
     body = `<ol class="mp-twists">${g.order.map((a, k) => {
       const gone1 = !present(a.pid), tap = canPick && !gone1 && !picked, open = phase !== "judge";
       const cls = ["mp-twist", canPick && mpChoice === k ? "chosen" : "", open && k === g.winner ? "won" : "", open && a.pid === ME ? "mine" : "", gone1 && !open ? "gone" : ""].filter(Boolean).join(" ");
@@ -273,7 +276,12 @@ document.addEventListener("click", e => {
   if (e.target.closest("[data-mp-full]")) { mpWishOpen = !mpWishOpen; render(); return; }
   const b = e.target.closest("[data-mp-wish], [data-mp-sub], [data-act='mp-pick']");
   if (!b || b.disabled) return;
-  if (b.dataset.mpWish != null) { const i = +b.dataset.mpWish; mpWishPick = mpWishPick === i ? null : i; render(); }
+  if (b.dataset.mpWish != null) {
+    const i = +b.dataset.mpWish, t = document.querySelector("#mpForm textarea");
+    mpWishPick = mpWishPick === i ? null : i;
+    if (mpWishPick != null && t) t.value = "";   // a deck wish and your own text never both stand: the pick replaces the draft
+    render();
+  }
   else if (b.dataset.mpSub != null) { mpChoice = +b.dataset.mpSub; render(); }
   else if (mpChoice != null) mpPick(mpChoice);
 });
