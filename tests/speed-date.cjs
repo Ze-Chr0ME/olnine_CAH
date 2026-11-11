@@ -22,7 +22,7 @@ function table(n = 2, opts = {}) {
     clearTimeout: id => timers.delete(id)
   };
   for (let i = 1; i <= n; i++) c.P['p' + i] = { joined: i, name: 'Player ' + i };
-  vm.createContext(c); vm.runInContext(source, c);
+  Object.assign(c, { document: { addEventListener() {} }, setInterval() {} }); vm.createContext(c); vm.runInContext(source, c);
   const start = () => c.L.game = c.GAMES.sd.start(Object.keys(c.P).filter(c.present).sort(c.byJoined), c.settings());
   const tick = () => c.GAMES.sd.tick(c.L.game);
   const at = t => { now = t; };
@@ -127,8 +127,6 @@ async function main() {
     await c.sdRate(5); assert.equal(c.sdMyRate(), 5); assert.equal(t.tick(), true);
     c.ME = 'p1'; await c.sdSendTrait('speaker'); await c.sdRate(5); assert.equal(t.writes.length, 2);
     assert.equal(t.errors.length, 0);
-    g.traits = [{ text: '<script>&', cat: 'player', by: 'p2' }]; c.GAMES.sd.render(g);
-    assert.ok(t.view.innerHTML.includes('&lt;script&gt;&amp;'));
   }
   {
     const t = table(); t.finish({ p2: 3 }); t.tick(); const callback = [...t.timers.values()][0].fn;

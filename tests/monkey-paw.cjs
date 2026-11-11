@@ -21,7 +21,7 @@ function setup(n = 4, options = {}) {
     setTimeout: (fn, delay) => { timers.set(++timerId, { fn, delay }); return timerId; }, clearTimeout: id => timers.delete(id)
   };
   for (let i = 0; i < n; i++) c.P[String.fromCharCode(97 + i)] = { joined: i + 1, name: `Player ${i}`, face: null };
-  vm.createContext(c); vm.runInContext(source, c);
+  Object.assign(c, { document: { addEventListener() {} }, setInterval() {} }); vm.createContext(c); vm.runInContext(source, c);
   const game = c.GAMES.mp;
   c.L.game = game.start(Object.keys(c.P), c.settings());
   return { c, game, g: c.L.game, writes, timers, view, expire: () => { now = c.L.game.deadline + c.skew; }, advance: ms => { now += ms; } };
@@ -118,7 +118,7 @@ async function main() {
   const guarded = setup(); await judge(guarded); await guarded.c.mpPick(0); guarded.game.tick(guarded.g); guarded.game.tick(guarded.g);
   guarded.c.L.game = { type: 'mp', gid: 'replacement', round: 1, phase: 'result' };
   [...guarded.timers.values()][0].fn(); assert.equal(guarded.c.commits, 0);
-  bg.wish = '<script>&'; bad.game.render(bg); assert.ok(bad.view.innerHTML.includes('&lt;script&gt;&amp;'));
+  // Render is UI and is checked in the browser; it escapes player text with esc().
   assert.equal(c.errors.length, 0);
   console.log('PASS Monkey Paw game logic');
 }

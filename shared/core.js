@@ -686,13 +686,14 @@ function noteSkew(d) {
   const s = Date.now() - (d.updated || 0);
   if (Math.abs(s) < 3600e3 && (skew == null || s < skew)) skew = s;
 }
+const TIMER_LBL = { pick: "to pick", wish: "to wish", twist: "to twist", write: "to write", rate: "to rate" };
 function updateTimer() {
   const el = $("timer"), g = L && L.game;
-  const live = g && g.deadline && (g.phase === "pick" || g.phase === "judge");
+  const live = g && g.deadline && !["result", "over", "reveal"].includes(g.phase);
   el.hidden = !live;
   if (!live) return;
   const left = Math.max(0, Math.ceil((g.deadline + (skew || 0) - Date.now()) / 1000));
-  el.innerHTML = `${ICONS.clock}${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}<span class="lbl"> ${g.phase === "pick" ? "to pick" : "for the czar"}</span>`;
+  el.innerHTML = `${ICONS.clock}${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}<span class="lbl"> ${TIMER_LBL[g.phase] || (g.type === "mp" ? "for the wisher" : "for the czar")}</span>`;
   el.classList.toggle("urgent", left <= 10);
 }
 const at = pid => `<strong>@${esc(nameOf(pid))}</strong>`;
@@ -1179,6 +1180,9 @@ document.addEventListener("click", e => {
   else if (act === "take-over") maybeTakeOver(true);
   else if (act === "submit") submitCards();
   else if (act === "award") awardPick();
+  else if ((act === "next" || act === "skip") && isHost() && L.game && GAMES[L.game.type] && GAMES[L.game.type][act]) {
+    if (act === "skip" || L.game.phase === "result") { GAMES[L.game.type][act](L.game); commit(); }
+  }
   else if (act === "next" && isHost() && L.game.phase === "result" && piled(L.game)) { startRound(L.game); commit(); }
   else if (act === "skip" && isHost() && piled(L.game)) { skipRound(L.game, "The host skipped this round."); commit(); }
   else if (act === "end" || act === "again") backToLobby();
@@ -1359,6 +1363,60 @@ function startGame() {
   L.status = "playing";
   commit();
 }
+/* ---------- shared game table (Monkey Paw, Speed Date) ---------- */
+/* Scoreboard, hall of shame and host buttons; `chip(pid)` gives the in-round state of a seated, present player. */
+function tableSide(g, { chip, won, empty }) {
+  const phase = g.phase, target = settings().target, host = isHost();
+  const ids = uniq(g.seats.concat(Object.keys(P).sort(byJoined), Object.keys(g.scores).filter(pid => g.scores[pid] > 0)));
+  fetchPeople(ids.map(pid => P[pid] && P[pid].uid));
+  $("scores").innerHTML = ids.map(pid => {
+    const score = g.scores[pid] || 0, left = !P[pid], away = !left && (gone(pid) || !online(pid)), w = won(pid);
+    const c = w ? `<span class="chip won">${phase === "over" ? "winner" : "+1"}</span>` : left ? `<span class="chip">left</span>`
+      : !g.seats.includes(pid) ? `<span class="chip">next round</span>` : away ? `<span class="chip">away</span>` : chip(pid);
+    const cells = Array.from({ length: target }, (_, k) => `<span class="cell ${k < score ? "l" + Math.min(4, 1 + Math.floor(k * 4 / target)) : ""}"></span>`).join("");
+    const tags = [pid === ME ? "you" : "", pid === L.host ? "host" : ""].filter(Boolean).join(", ");
+    return `<li class="player ${w ? "is-winner" : ""} ${left || away ? "is-away" : ""}">${avHTML(lookOf(pid), "md")}
+      <span class="pname">@${esc(nameOf(pid))}${tags ? ` <em>(${tags})</em>` : ""}</span><span class="pstate">${c}</span>
+      <span class="graph" role="img" aria-label="${score} of ${target} points">${cells}</span><span class="pts">${score}/${target}</span></li>`;
+  }).join("");
+  $("log").innerHTML = g.log.length
+    ? g.log.map(l => `<li><span class="h">${esc(l.h)}</span><span class="t">${l.who ? `<b>@${esc(nameOf(l.who))}</b> ` : ""}${esc(l.what)}</span></li>`).join("")
+    : `<li class="empty">${empty}</li>`;
+  $("hostTools").innerHTML = host
+    ? (phase === "over" ? "" : `<button class="btn small icon" type="button" data-act="skip" data-tip="Skip round" aria-label="Skip round">${ICONS.skip}</button><button class="btn small danger icon" type="button" data-act="end" data-tip="End game" aria-label="End game">${ICONS.stop}</button>`)
+    : !room ? `<button class="btn small" type="button" data-act="take-over">${ICONS.crown}Host not responding? Take over</button>` : "";
+}
+function tableOverStatus(g) {
+  const champs = g.champions || [], pts = plural(champs.length ? g.scores[champs[0]] || 0 : 0, "point", "points");
+  if (!champs.length) return "Game over. Nobody scored. Everyone loses.";
+  if (champs.length === 1) return champs[0] === ME ? `You won the game with ${pts}. You monster.` : `${at(champs[0])} won the game with ${pts}.`;
+  const names = champs.slice().sort((x, y) => (y === ME) - (x === ME)).map(pid => pid === ME ? "You" : at(pid));
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} tied for the win with ${pts}.`;
+}
+/* A writing box for the tray; the round's main button submits it with form="<id>". Enter sends, Shift+Enter breaks the line. */
+function composer(id, key, lead, ph, max) {
+  return `<form id="${id}" class="composer" autocomplete="off"><label for="${id}Text">${esc(lead)}</label>
+    <textarea id="${id}Text" data-key="${esc(key)}" maxlength="${max}" rows="2" placeholder="${esc(ph)}" spellcheck="true"></textarea>
+    <span class="composer-n" aria-hidden="true">0/${max}</span></form>`;
+}
+/* Redraws the tray without losing what the player was typing or where their cursor was. */
+function keepDraft(draw) {
+  const old = $("tray").querySelector("textarea"), focused = old && document.activeElement === old;
+  const saved = old && { key: old.dataset.key, v: old.value, a: old.selectionStart, b: old.selectionEnd };
+  draw();
+  const now = $("tray").querySelector("textarea");
+  if (!now || !saved || saved.key !== now.dataset.key) return;
+  now.value = saved.v; now.dispatchEvent(new Event("input", { bubbles: true }));
+  if (focused) { now.focus(); now.setSelectionRange(saved.a, saved.b); }
+}
+document.addEventListener("input", e => {
+  const t = e.target.closest(".composer textarea");
+  if (t) t.parentElement.querySelector(".composer-n").textContent = `${t.value.length}/${t.maxLength}`;
+});
+document.addEventListener("keydown", e => {
+  const t = e.target.closest && e.target.closest(".composer textarea");
+  if (t && e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); t.form.requestSubmit(); }
+});
 function renderGame() {
   const g = L && L.game;
   if (g) (GAMES[g.type || "cah"] || curGame()).render(g);
