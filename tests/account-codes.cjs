@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const {webcrypto} = require('node:crypto');
 const {initializeTestEnvironment, assertSucceeds, assertFails} = require('@firebase/rules-unit-testing');
 const {doc, getDoc, getDocs, collection, setDoc, deleteDoc, runTransaction, onSnapshot} = require('firebase/firestore');
-const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+const html = fs.readFileSync(path.join(__dirname, '../shared/core.js'), 'utf8');
 const profileSource = html.slice(html.indexOf('const XP ='), html.indexOf('/* ---------- notices & errors'));
 const accountSource = html.slice(html.indexOf('const ACCOUNT_ALPHABET'), html.indexOf('/* Portrait editor:'));
 const wrap = s => ({exists:s.exists(), data:()=>s.data()});

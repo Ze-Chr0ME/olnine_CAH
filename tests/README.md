@@ -1,6 +1,6 @@
 # Account-code integration tests
 
-These tests load the profile and account functions from `index.html`, connect independent device contexts to the Firestore emulator, and enforce the real `firestore.rules`. They cover existing progress, code creation, connecting and reloading another device, live profile changes, concurrent reward transactions, replayed rewards, invalid input and unauthorized reads/writes. They do not test browser layout.
+These tests load the profile and account functions from `shared/core.js`, connect independent device contexts to the Firestore emulator, and enforce the real `firestore.rules`. They cover existing progress, code creation, connecting and reloading another device, live profile changes, concurrent reward transactions, replayed rewards, invalid input and unauthorized reads/writes. They do not test browser layout.
 
 From the repository root, with Node.js and Java 21 installed, run in PowerShell:
 
