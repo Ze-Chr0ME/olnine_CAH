@@ -48,7 +48,8 @@ function mpDeal(g) {
 }
 function mpStartRound(g) {
   const s = settings(), seats = Object.keys(P).filter(present).sort(byJoined), prev = g.wisherJoined ?? -1;
-  const wisher = seats.find(pid => (P[pid].joined || 0) > prev) || seats[0] || null;
+  const wisher = seats.find(pid => g.wisher && P[g.wisher] ? pid !== g.wisher && byJoined(pid, g.wisher) > 0 :
+    (P[pid].joined || 0) > prev || ((P[pid].joined || 0) === prev && pid > g.wisher)) || seats[0] || null;
   Object.assign(g, { seats, wisher, wisherJoined: (P[wisher] && P[wisher].joined) || 0, round: g.round + 1,
     phase: "wish", wish: null, wishCards: [], order: [], winner: null, randomWin: false, deadline: s.mpTime ? mpNow() + s.mpTime * 1000 : 0 });
   g.wishCards = mpDeal(g);

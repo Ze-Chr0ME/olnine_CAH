@@ -43,7 +43,11 @@ function sdNextAt(g) {
 function sdStartRound(g) {
   const s = settings(), seats = Object.keys(P).filter(present).sort(byJoined), prev = g.speakerJoined ?? -1;
   if (!seats.length) return sdEndGame(g);
-  const speaker = seats.find(pid => (P[pid].joined || 0) > prev) || seats[0];
+  sdCloseCycle(g, seats);
+  if (g.phase === "over") return;
+  const unplayed = seats.filter(pid => !g.cycle.includes(pid));
+  const speaker = unplayed.find(pid => g.speaker && P[g.speaker] ? pid !== g.speaker && byJoined(pid, g.speaker) > 0 :
+    (P[pid].joined || 0) > prev || ((P[pid].joined || 0) === prev && pid > g.speaker)) || unplayed[0];
   Object.assign(g, { seats, speaker, speakerJoined: P[speaker].joined || 0, round: g.round + 1, phase: "write", traits: [], startAt: 0,
     count: sdNum(s.sdCount, 8), every: sdNum(s.sdEvery, 5), deadline: s.sdWrite === 0 ? 0 : sdNow() + sdNum(s.sdWrite, 40) * 1000, cycleWinners: [] });
   for (const pid of seats) {
@@ -88,14 +92,17 @@ function sdFinishTurn(g) {
   g.turns[g.round] = { pid: g.speaker, avg, n: votes.length };
   if (!g.cycle.includes(g.speaker)) g.cycle.push(g.speaker);
   g.cycleWinners = [];
-  if (Object.keys(P).filter(present).every(pid => g.cycle.includes(pid))) {
-    const turns = Object.entries(g.turns).filter(([r, t]) => +r >= g.cycleFrom && t.avg !== null).map(([, t]) => t);
-    const best = Math.max(...turns.map(t => t.avg));
-    g.cycleWinners = [...new Set(turns.filter(t => t.avg === best).map(t => t.pid))];
-    for (const pid of g.cycleWinners) g.scores[pid] = (g.scores[pid] || 0) + 1;
-    g.cycle = []; g.cycleFrom = g.round + 1;
-  }
   Object.assign(g, { phase: "result", deadline: 0 });
+  sdCloseCycle(g, Object.keys(P).filter(present));
+}
+function sdCloseCycle(g, seats) {
+  if (!g.cycle.length || !seats.every(pid => g.cycle.includes(pid))) return;
+  const seen = new Set(), turns = Object.entries(g.turns).filter(([r]) => +r >= g.cycleFrom).sort((a, b) => +a[0] - +b[0])
+    .map(([, t]) => t).filter(t => { if (seen.has(t.pid)) return false; seen.add(t.pid); return t.avg !== null; });
+  const best = Math.max(...turns.map(t => t.avg));
+  g.cycleWinners = turns.filter(t => t.avg === best).map(t => t.pid);
+  for (const pid of g.cycleWinners) g.scores[pid] = (g.scores[pid] || 0) + 1;
+  g.cycle = []; g.cycleFrom = g.round + 1;
   const champions = g.cycleWinners.filter(pid => g.scores[pid] >= settings().target);
   if (champions.length) sdEndGame(g, champions);
 }

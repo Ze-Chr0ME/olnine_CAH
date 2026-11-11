@@ -57,6 +57,15 @@ async function main() {
   game.tick(g); assert.equal(g.scores.c, 2); assert.equal(g.phase, 'over'); assert.equal(c.L.status, 'over');
   assert.deepEqual(Array.from(g.champions), ['c']); assert.equal(g.log.length, 2);
 
+  // Equal join times rotate by pid, including after the previous seat is deleted.
+  const tied = setup(4);
+  for (const p of Object.values(tied.c.P)) p.joined = 1;
+  const rotation = [tied.g.wisher];
+  for (let i = 0; i < 4; i++) { tied.c.mpStartRound(tied.g); rotation.push(tied.g.wisher); }
+  assert.deepEqual(rotation, ['a', 'b', 'c', 'd', 'a']);
+  delete tied.c.P.a; tied.c.mpStartRound(tied.g); assert.equal(tied.g.wisher, 'b');
+  tied.c.P.b.gone = true; tied.c.mpStartRound(tied.g); assert.equal(tied.g.wisher, 'c');
+
   // All deck indices are drawn before recycling; missing languages fall back to English.
   const deck = setup(3, { lang: 'missing' }), dealt = [];
   for (let i = 0; i < 3; i++) { dealt.push(...deck.g.wishCards); deck.c.mpStartRound(deck.g); }

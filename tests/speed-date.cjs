@@ -132,6 +132,70 @@ async function main() {
     const t = table(); t.finish({ p2: 3 }); t.tick(); const callback = [...t.timers.values()][0].fn;
     t.c.L.game = null; callback(); assert.equal(t.commits(), 0);
   }
+  // Equal timestamps must include every speaker and complete a scoring lap.
+  {
+    const t = table(4), g = t.c.L.game, rotation = [];
+    for (const p of Object.values(t.c.P)) p.joined = 1;
+    for (let i = 0; i < 4; i++) {
+      rotation.push(g.speaker);
+      t.finish(Object.fromEntries(Object.keys(t.c.P).filter(pid => pid !== g.speaker).map(pid => [pid, 4])));
+      t.next();
+    }
+    assert.deepEqual(rotation, ['p1', 'p2', 'p3', 'p4']); assert.equal(g.speaker, 'p1');
+    assert.deepEqual(Object.values(g.scores), [1, 1, 1, 1]);
+    delete t.c.P.p1; t.tick(); assert.equal(g.speaker, 'p2');
+  }
+  // A new seat before the previous speaker still takes its unplayed turn first.
+  {
+    const t = table(3), g = t.c.L.game;
+    t.finish({ p2: 3, p3: 3 }); t.next();
+    t.c.P.p0 = { joined: 0, name: 'New' };
+    t.finish({ p1: 3, p3: 3 }); t.next(); t.finish({ p1: 3, p2: 3, p0: 3 }); t.next();
+    assert.equal(g.speaker, 'p0'); assert.equal(g.scores.p1, 0);
+  }
+  // Leaving the last unplayed seat closes the lap before a repeat turn, even on a skip.
+  for (const active of [false, true]) for (const target of [1, 5]) {
+    const t = table(3, { target }), g = t.c.L.game;
+    t.finish({ p2: 4, p3: 4 }); t.next(); t.finish({ p1: 2, p3: 2 });
+    if (active) { t.next(); assert.equal(g.speaker, 'p3'); }
+    delete t.c.P.p3;
+    if (active) t.tick(); else t.next();
+    assert.equal(g.scores.p1, 1); assert.equal(g.scores.p2, 0);
+    assert.equal(Object.keys(g.turns).length, 2); assert.equal(g.cycle.length, 0);
+    assert.equal(g.phase, target === 1 ? 'over' : 'write');
+    if (target === 5) {
+      assert.equal(g.speaker, 'p1'); t.finish({ p2: 1 }); t.next(); t.finish({ p1: 5 });
+      assert.equal(g.scores.p1, 1); assert.equal(g.scores.p2, 1);
+    }
+  }
+  // Old lobby state with duplicate turns counts only each speaker's first attempt.
+  for (const first of [2, null]) {
+    const t = table(2), g = t.c.L.game;
+    g.turns = { 1: { pid: 'p1', avg: first }, 2: { pid: 'p1', avg: 5 } };
+    g.cycle = ['p1']; g.round = 2; g.speaker = 'p2';
+    t.finish({ p1: 4 });
+    assert.deepEqual(Array.from(g.cycleWinners), ['p2']); assert.equal(g.scores.p1, 0); assert.equal(g.scores.p2, 1);
+  }
+  // Load only the real takeover function; the rest of core initializes the browser and Firebase.
+  {
+    const core = fs.readFileSync(path.join(__dirname, '../shared/core.js'), 'utf8');
+    const takeover = core.slice(core.indexOf('function maybeTakeOver(force) {'), core.indexOf('function afterChange()'));
+    for (const type of ['cah', 'mp', 'sd']) for (const skew of [-120000, 120000]) {
+      const g = { type, deadline: 500000, startAt: type === 'sd' ? 450000 : 0 }, now = 400000;
+      const c = { L: { host: 'old', game: g }, ME: 'new', myName: 'New', skew, skewHost: 'old',
+        isHost: () => false, notice() {}, commit: () => { c.committed = true; } };
+      vm.createContext(c); vm.runInContext(takeover, c); c.maybeTakeOver(true);
+      assert.equal(g.deadline - now, 500000 - (now - skew));
+      assert.equal(g.startAt, type === 'sd' ? 450000 + skew : 0);
+      assert.equal(c.skew, 0); assert.equal(c.skewHost, 'new'); assert.equal(c.L.host, 'new'); assert.equal(c.committed, true);
+    }
+    for (const deadline of [0, null, '500000']) {
+      const c = { L: { game: { deadline } }, ME: 'new', myName: 'New', skew: 123,
+        isHost: () => false, notice() {}, commit() {} };
+      vm.createContext(c); vm.runInContext(takeover, c); c.maybeTakeOver(true);
+      assert.equal(c.L.game.deadline, deadline);
+    }
+  }
   console.log('PASS');
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });

@@ -600,6 +600,10 @@ function maybeTakeOver(force) {
     const next = Object.keys(P).filter(pid => pid !== L.host && online(pid)).sort(byJoined)[0];
     if (next !== ME) return;
   }
+  if (L.game) for (const key of ["deadline", "startAt"]) {
+    if (typeof L.game[key] === "number" && L.game[key] > 0) L.game[key] += skew || 0;
+  }
+  skew = 0; skewHost = ME;
   L.host = ME; L.hostName = myName;
   notice("The host left, so you are hosting now.");
   commit();
