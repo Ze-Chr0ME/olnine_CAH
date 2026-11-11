@@ -28,9 +28,9 @@ function table(n = 2, opts = {}) {
   const at = t => { now = t; };
   const stamp = (pid, key, value) => c.P[pid][key] = { gid: c.L.game.gid, round: c.L.game.round, ...value };
   const reveal = () => { at(c.L.game.deadline); assert.equal(tick(), true); assert.equal(c.L.game.phase, 'reveal'); };
-  const rate = () => { const g = c.L.game; at(g.startAt + g.count * g.every * 1000 + 3000); tick(); assert.equal(g.phase, 'rate'); };
+  const rate = () => { const g = c.L.game; at(g.startAt + g.traits.length * g.every * 1000 + 3000); tick(); assert.equal(g.phase, 'rate'); };
   const finish = votes => { reveal(); rate(); for (const [pid, v] of Object.entries(votes)) stamp(pid, 'rate', { v }); at(c.L.game.deadline); tick(); };
-  const next = () => { const g = c.L.game; tick(); assert.equal(g.phase, 'result'); const t = [...timers.values()][0]; assert.ok(t); timers.clear(); at(t.at); t.fn(); };
+  const next = () => { const g = c.L.game; assert.equal(g.phase, 'result'); assert.ok(g.deadline); at(g.deadline); assert.equal(tick(), true); };
   start(); return { c, start, tick, at, stamp, reveal, rate, finish, next, timers, writes, errors, view, commits: () => commits };
 }
 async function main() {
@@ -49,6 +49,7 @@ async function main() {
     assert.equal(t.tick(), true); assert.equal(g.traits.length, 8);
     assert.deepEqual(Array.from(g.traits.slice(0, 3), v => v.cat), ['gender', 'age', 'height']);
     assert.equal(g.traits.filter(v => v.by).length, 4);
+    assert.deepEqual(Array.from(g.traits.filter(v => v.by), v => v.by).sort(), ['p10', 'p11', 'p12', 'p9']);
     assert.equal(new Set(g.traits.map(v => v.text)).size, 8);
     t.at(g.startAt - 1); assert.equal(c.sdVisible(g), 0); assert.equal(c.sdNextAt(g), g.startAt);
     t.at(g.startAt); assert.equal(c.sdVisible(g), 1); assert.equal(c.sdNextAt(g), g.startAt + 5000);
@@ -64,7 +65,10 @@ async function main() {
     const t = table(4, { sdCount: count });
     t.stamp('p2', 'trait', { text: 'custom' }); t.stamp('p3', 'trait', { text: 'custom' }); t.stamp('p4', 'trait', { text: 'gender3' });
     t.tick(); const g = t.c.L.game;
-    assert.equal(g.traits.length, count); assert.equal(new Set(g.traits.map(v => v.text)).size, count);
+    const total = Math.min(count, 10 + g.traits.filter(v => v.by).length);
+    assert.equal(g.traits.length, total); assert.equal(new Set(g.traits.map(v => v.text)).size, total);
+    const deck = g.traits.filter(v => !v.by);
+    assert.equal(new Set(deck.map(v => v.cat)).size, deck.length);
     assert.deepEqual(Array.from(g.traits.slice(0, Math.min(3, count)), v => v.cat), ['gender', 'age', 'height'].slice(0, count));
     assert.ok(g.traits.filter(v => v.by).length <= Math.floor(count / 2));
   }
@@ -79,8 +83,8 @@ async function main() {
     assert.equal(t.tick(), false); t.reveal();
     assert.equal(g.traits.filter(v => v.by).length, 1); assert.ok(g.traits.some(v => v.text === 'valid'));
     t.rate(); t.stamp('p2', 'rate', { v: 3 }); t.stamp('p3', 'rate', { v: 4 }); t.stamp('p4', 'rate', { v: 4 });
-    assert.equal(t.tick(), true); assert.equal(g.turns[1].avg, 3.67); assert.equal(g.turns[1].n, 3);
-    t.next(); assert.equal(g.speaker, 'p2'); assert.equal(g.round, 2); assert.equal(t.commits(), 1);
+    assert.equal(t.tick(), true); assert.equal(g.turns[1].avg, 11 / 3); assert.equal(g.turns[1].n, 3);
+    t.next(); assert.equal(g.speaker, 'p2'); assert.equal(g.round, 2); assert.equal(t.commits(), 0);
     t.reveal(); t.rate(); assert.equal(t.tick(), false); // previous-round votes cannot finish this turn
   }
   {
@@ -127,10 +131,6 @@ async function main() {
     await c.sdRate(5); assert.equal(c.sdMyRate(), 5); assert.equal(t.tick(), true);
     c.ME = 'p1'; await c.sdSendTrait('speaker'); await c.sdRate(5); assert.equal(t.writes.length, 2);
     assert.equal(t.errors.length, 0);
-  }
-  {
-    const t = table(); t.finish({ p2: 3 }); t.tick(); const callback = [...t.timers.values()][0].fn;
-    t.c.L.game = null; callback(); assert.equal(t.commits(), 0);
   }
   // Equal timestamps must include every speaker and complete a scoring lap.
   {
@@ -180,21 +180,28 @@ async function main() {
   {
     const core = fs.readFileSync(path.join(__dirname, '../shared/core.js'), 'utf8');
     const functions = [
-      core.slice(core.indexOf('function maybeTakeOver(force) {'), core.indexOf('function afterChange()')),
-      core.slice(core.indexOf('function noteSkew(d) {'), core.indexOf('const TIMER_LBL')),
+      core.slice(core.indexOf('let takingOver = false;'), core.indexOf('function afterChange()')),
+      core.slice(core.indexOf('function rebaseClock(g, offset) {'), core.indexOf('const TIMER_LBL')),
       core.slice(core.indexOf('function listen(c) {'), core.indexOf('function exitLobby(msg) {')),
       core.slice(core.indexOf('async function leaveLobby() {'), core.indexOf('async function closeLobby(c) {'))
     ].join('\n');
     function client(host, skew, game) {
       const c = { L: { host: 'old', game, rev: 1 }, ME: host, myName: host, skew, skewHost: 'old',
-        P: { old: {}, new: {} }, code: 'TEST', seenRev: 0, unsubLobby: null, unsubPlayers: null,
+        P: { old: { owner: 'old' }, new: { owner: 'new' } }, code: 'TEST', seenRev: 0, unsubLobby: null, unsubPlayers: null, leaving: false,
         clone: x => JSON.parse(JSON.stringify(x)), isHost: () => c.L.host === c.ME,
         piled: () => true, notice() {}, setPresence() {}, dbErr(e) { throw e; }, afterChange() {},
         savePiles: async () => {}, online: () => true, gone: () => false, byJoined: () => 0,
         nameOf: pid => pid, exitLobby() {}, writeError(e) { throw e; }, commits: 0,
         Date: { now: () => 400000 },
-        commit() { c.commits++; c.L.rev++; c.L.updated = c.Date.now(); },
-        db: { doc: () => ({
+        hostStamp: () => 400000,
+        commit() { c.commits++; c.L.rev++; c.L.updated = c.Date.now(); c.L.clockHost = c.ME; },
+        db: { runTransaction: async fn => fn({
+          get: async () => ({ exists: true, data: () => c.server || c.L }),
+          set: (ref, body) => {
+            c.saved = body; c.server = body;
+            if (c.snapshot) c.snapshot({ exists: true, data: () => body });
+          }
+        }), doc: () => ({
           onSnapshot: cb => { c.snapshot = cb; return () => {}; },
           set: async body => { c.saved = body; }, delete: async () => {}
         }), collection: () => ({ onSnapshot: () => () => {} }) }
@@ -207,7 +214,7 @@ async function main() {
         const g = { type, deadline: 500000, startAt: type === 'sd' ? 390000 : 0 };
         const c = client('new', skew, { ...g });
         c.listen('TEST');
-        if (path === 'takeover') c.maybeTakeOver(true);
+        if (path === 'takeover') await c.maybeTakeOver(true);
         else {
           const old = client('old', 0, { ...g });
           await old.leaveLobby();
@@ -225,16 +232,19 @@ async function main() {
         assert.equal(c.commits, 1);
         if (type === 'sd') {
           const t = table();
-          t.c.L.game = { ...c.L.game, count: 8, every: 5, phase: 'reveal', traits: Array(8).fill({}) };
+          t.c.L.game = { ...t.c.L.game, ...c.L.game, count: 8, every: 5, phase: 'reveal', traits: Array(8).fill({}) };
           t.c.skew = c.skew; t.at(400000 + skew);
           assert.equal(t.c.sdVisible(t.c.L.game), 3);
           assert.equal(t.c.sdNextAt(t.c.L.game), 405000 + skew);
+          assert.equal(t.tick(), false); assert.equal(t.c.L.game.round, 1);
+          t.at(433000 + skew); assert.equal(t.tick(), true);
+          assert.equal(t.c.L.game.phase, 'rate'); assert.equal(t.c.L.game.deadline, 463000 + skew);
         }
         // Pending and acknowledged echoes, plus repeated takeover checks, never rebase again.
         const echo = c.clone(c.L);
         for (const pending of [true, false]) {
           c.snapshot({ exists: true, data: () => echo, metadata: { hasPendingWrites: pending } });
-          c.maybeTakeOver(true);
+          await c.maybeTakeOver(true);
           assert.equal(c.L.game.deadline, g.deadline + skew);
           assert.equal(c.L.game.startAt, type === 'sd' ? g.startAt + skew : 0);
           assert.equal(c.commits, 1);
@@ -243,16 +253,118 @@ async function main() {
     }
     for (const deadline of [0, null, '500000']) {
       const c = client('new', 123, { deadline });
-      c.maybeTakeOver(true);
+      c.listen('TEST');
+      await c.maybeTakeOver(true);
+      assert.equal(c.L.host, 'new');
       assert.equal(c.L.game.deadline, deadline);
     }
     // No game and first joining an already-owned lobby require no timestamp conversion.
     const empty = client('new', 123, null);
-    empty.maybeTakeOver(true); assert.equal(empty.L.game, null);
+    empty.listen('TEST'); await empty.maybeTakeOver(true); assert.equal(empty.L.game, null);
     const initial = client('new', 123, null);
     initial.L = null; initial.listen('TEST');
     initial.snapshot({ exists: true, data: () => ({ host: 'new', rev: 1, game: { deadline: 500000 } }) });
     assert.equal(initial.L.game.deadline, 500000); assert.equal(initial.commits, 0);
+  }
+  // All shipped languages have ten categories. Larger dates stop at category exhaustion,
+  // with the actual deck length controlling the reveal-to-rate transition.
+  {
+    const data = {};
+    vm.createContext(data);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../speed-date/traits.js'), 'utf8') + ';this.pool = SD_TRAITS;', data);
+    for (const lang of ['en', 'de', 'fr']) for (const written of [false, true]) {
+      const t = table(2, { lang, sdCount: 15 }), { c } = t, g = c.L.game;
+      c.SD_TRAITS = data.pool;
+      assert.equal(Object.keys(data.pool[lang]).length, 10);
+      assert.equal(c.sdCheck(Object.keys(c.P), c.settings()).ok, true);
+      if (written) t.stamp('p2', 'trait', { text: 'A unique player trait' });
+      else t.at(g.deadline);
+      t.tick();
+      assert.equal(g.traits.length, written ? 11 : 10);
+      assert.deepEqual(Array.from(g.traits.slice(0, 3), v => v.cat), ['gender', 'age', 'height']);
+      const deck = g.traits.filter(v => !v.by);
+      assert.equal(new Set(deck.map(v => v.cat)).size, deck.length);
+      const end = g.startAt + g.traits.length * g.every * 1000 + 3000;
+      t.at(end - 1); assert.equal(t.tick(), false);
+      t.at(end); assert.equal(t.tick(), true); assert.equal(g.phase, 'rate');
+      assert.equal(g.deadline, end + 30000);
+    }
+  }
+  // Distinct real averages which both round to 2.04 must not tie for a cycle point.
+  {
+    const t = table(28), { c } = t, g = c.L.game;
+    t.finish(Object.fromEntries(Object.keys(c.P).filter(p => p !== 'p1').map(p => [p, p === 'p2' ? 3 : 2])));
+    assert.equal(g.turns[1].avg, 55 / 27);
+    t.next(); c.P.p28.gone = true;
+    g.cycle = Object.keys(c.P).filter(p => p !== 'p2');
+    t.finish(Object.fromEntries(Object.keys(c.P).filter(p => p !== 'p2' && c.present(p)).map(p => [p, p === 'p1' ? 3 : 2])));
+    assert.equal(g.turns[2].avg, 53 / 26);
+    assert.equal(g.turns[1].avg.toFixed(2), g.turns[2].avg.toFixed(2));
+    assert.deepEqual(Array.from(g.cycleWinners), ['p2']);
+    assert.equal(g.scores.p1, 0); assert.equal(g.scores.p2, 1);
+  }
+  // A fresh host resumes the persisted result deadline without local timers.
+  {
+    const old = table(); old.finish({ p2: 3 });
+    const deadline = old.c.L.game.deadline;
+    assert.equal(deadline, 225000); // rate ends at 216000; next is nine seconds
+    const fresh = table();
+    fresh.c.L = JSON.parse(JSON.stringify(old.c.L));
+    fresh.c.L.host = fresh.c.ME = 'p2';
+    fresh.at(deadline - 4000);
+    assert.equal(fresh.tick(), false);
+    assert.equal(fresh.c.L.game.deadline, deadline);
+    assert.equal(fresh.timers.size, 0);
+    fresh.at(deadline - 1); assert.equal(fresh.tick(), false);
+    fresh.at(deadline); assert.equal(fresh.tick(), true);
+    assert.equal(fresh.c.L.game.round, 2);
+    assert.equal(fresh.c.L.game.phase, 'write');
+  }
+  // Manual results remain untimed; older result state acquires one persisted deadline.
+  {
+    const t = table(2, { next: 0 }); t.finish({ p2: 3 });
+    assert.equal(t.c.L.game.deadline, 0);
+    t.at(999999); assert.equal(t.tick(), false);
+    assert.equal(t.c.L.game.phase, 'result');
+    t.c.L.settings.next = 9;
+    assert.equal(t.tick(), true);
+    const deadline = t.c.L.game.deadline;
+    assert.equal(deadline, 1008999);
+    t.at(deadline - 1); assert.equal(t.tick(), false);
+    assert.equal(t.c.L.game.deadline, deadline);
+    t.at(deadline); assert.equal(t.tick(), true);
+  }
+  // Departed listeners stop blocking both phases; their old submissions do not count.
+  for (const phase of ['write', 'rate']) {
+    const t = table(3), { c } = t, g = c.L.game;
+    if (phase === 'rate') { t.reveal(); t.rate(); }
+    t.stamp('p2', phase === 'write' ? 'trait' : 'rate', phase === 'write' ? { text: 'present' } : { v: 5 });
+    assert.equal(t.tick(), false);
+    c.P.p3.gone = true;
+    assert.equal(t.tick(), true); assert.equal(g.phase, phase === 'write' ? 'reveal' : 'result');
+    if (phase === 'rate') { assert.equal(g.turns[1].avg, 5); assert.equal(g.turns[1].n, 1); }
+  }
+  // A joiner is a spectator until the next turn and cannot block or rate this one.
+  {
+    const t = table(), { c } = t, g = c.L.game;
+    c.P.p3 = { name: 'New', joined: 3 }; c.ME = 'p3';
+    assert.equal(c.sdRole(), 'spectator');
+    await c.sdSendTrait('ignored'); assert.equal(t.writes.length, 0);
+    t.stamp('p2', 'trait', { text: 'ready' }); assert.equal(t.tick(), true); t.rate();
+    t.stamp('p3', 'rate', { v: 1 }); await c.sdRate(1); assert.equal(t.writes.length, 0);
+    t.stamp('p2', 'rate', { v: 5 }); assert.equal(t.tick(), true);
+    assert.equal(g.turns[1].n, 1); assert.equal(g.turns[1].avg, 5);
+  }
+  // No present seats during an active turn ends safely; zero-listener turns earn no point.
+  for (const all of [false, true]) {
+    const t = table(), { c } = t, g = c.L.game;
+    delete c.P.p2;
+    if (all) { delete c.P.p1; assert.equal(t.tick(), true); assert.equal(g.phase, 'over'); }
+    else {
+      assert.equal(t.tick(), true); t.rate(); assert.equal(t.tick(), true);
+      assert.equal(g.turns[1].avg, null); assert.equal(g.scores.p1, 0); assert.equal(g.cycleWinners.length, 0);
+      t.next(); assert.equal(g.speaker, 'p1');
+    }
   }
   console.log('PASS');
 }

@@ -15,7 +15,7 @@ function setup(n = 4, options = {}) {
     nameOf: pid => c.P[pid]?.name || pid, rid: () => `game${++id}`,
     shuffle: a => a.slice().reverse(), clone: a => JSON.parse(JSON.stringify(a)),
     esc: a => String(a).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;'),
-    $: () => view, notice: () => {}, writeError: e => c.errors.push(e), isHost: () => c.ME === 'a',
+    $: () => view, notice: () => {}, writeError: e => c.errors.push(e), isHost: () => c.ME === (c.L.host || 'a'),
     commit: () => c.commits++,
     myRef: () => ({ update: async a => { writes.push({ pid: c.ME, ...a }); Object.assign(c.P[c.ME], a); } }),
     setTimeout: (fn, delay) => { timers.set(++timerId, { fn, delay }); return timerId; }, clearTimeout: id => timers.delete(id)
@@ -49,9 +49,10 @@ async function main() {
   const k = g.order.findIndex(a => a.pid === 'c');
   await c.mpPick(k); assert.equal(game.tick(g), true);
   assert.equal(g.phase, 'result'); assert.equal(g.winner, k); assert.equal(g.scores.c, 1);
-  assert.equal(game.tick(g), false); game.tick(g); assert.equal(h.timers.size, 1);
-  const timer = [...h.timers.values()][0]; assert.equal(timer.delay, 3000); timer.fn();
-  assert.equal(c.commits, 1); assert.equal(g.wisher, 'b'); assert.equal(g.round, 2); assert.equal(c.mpMine(), null);
+  assert.equal(g.deadline, 102500); assert.equal(game.tick(g), false);
+  h.advance(2999); assert.equal(game.tick(g), false);
+  h.advance(1); assert.equal(game.tick(g), true); assert.equal(h.timers.size, 0);
+  assert.equal(c.commits, 0); assert.equal(g.wisher, 'b'); assert.equal(g.round, 2); assert.equal(c.mpMine(), null);
   await judge(h);
   await as(c, 'b', () => c.mpPick(g.order.findIndex(a => a.pid === 'c')));
   game.tick(g); assert.equal(g.scores.c, 2); assert.equal(g.phase, 'over'); assert.equal(c.L.status, 'over');
@@ -64,6 +65,7 @@ async function main() {
   for (let i = 0; i < 4; i++) { tied.c.mpStartRound(tied.g); rotation.push(tied.g.wisher); }
   assert.deepEqual(rotation, ['a', 'b', 'c', 'd', 'a']);
   delete tied.c.P.a; tied.c.mpStartRound(tied.g); assert.equal(tied.g.wisher, 'b');
+  tied.c.P.e = { joined: 2, name: 'New' };
   tied.c.P.b.gone = true; tied.c.mpStartRound(tied.g); assert.equal(tied.g.wisher, 'c');
 
   // All deck indices are drawn before recycling; missing languages fall back to English.
@@ -96,7 +98,7 @@ async function main() {
   dropped.game.tick(dropped.g); assert.equal(dropped.g.order.length, 2);
   dropped.c.P[dropped.g.order[0].pid].gone = true;
   await dropped.c.mpPick(0); assert.equal(dropped.c.P.a.pick, undefined);
-  dropped.expire(); dropped.game.tick(dropped.g); assert.equal(dropped.g.winner, 1);
+  dropped.expire(); dropped.game.tick(dropped.g); assert.equal(dropped.g.phase, 'over'); assert.equal(dropped.g.winner, null);
 
   // Host treats every seat as untrusted; stale actions, malformed values and invalid picks are ignored.
   const bad = setup(3), b = bad.c, bg = bad.g;
@@ -124,9 +126,78 @@ async function main() {
   assert.equal(unlimited.g.deadline, 0); unlimited.advance(1e9); assert.equal(unlimited.game.tick(unlimited.g), false);
   await judge(unlimited); assert.equal(unlimited.g.deadline, 0); unlimited.advance(1e9); assert.equal(unlimited.game.tick(unlimited.g), false);
   await unlimited.c.mpPick(0); unlimited.game.tick(unlimited.g); unlimited.game.tick(unlimited.g); assert.equal(unlimited.timers.size, 0);
-  const guarded = setup(); await judge(guarded); await guarded.c.mpPick(0); guarded.game.tick(guarded.g); guarded.game.tick(guarded.g);
-  guarded.c.L.game = { type: 'mp', gid: 'replacement', round: 1, phase: 'result' };
-  [...guarded.timers.values()][0].fn(); assert.equal(guarded.c.commits, 0);
+  // Result timing is entirely serialized: a new host resumes the remaining delay.
+  const handoff = setup(4); await judge(handoff); await handoff.c.mpPick(0); handoff.game.tick(handoff.g);
+  const saved = JSON.parse(JSON.stringify(handoff.g)), deadline = saved.deadline;
+  handoff.advance(2000);
+  const newHost = setup(4); newHost.advance(2000); newHost.c.ME = 'b'; newHost.c.L.host = 'b'; newHost.c.L.game = saved;
+  assert.equal(newHost.game.tick(saved), false); assert.equal(saved.deadline, deadline);
+  newHost.advance(1000); assert.equal(newHost.game.tick(saved), true); assert.equal(saved.round, 2);
+  assert.equal(saved.wisher, 'b'); assert.equal(newHost.timers.size, 0);
+  // Wish/twist/judge deadlines also survive host replacement and clock skew.
+  for (const phase of ['wish', 'twist', 'judge']) {
+    const old = setup(4);
+    if (phase === 'twist') { await old.c.mpSendWish('wish'); old.game.tick(old.g); }
+    if (phase === 'judge') await judge(old);
+    const restored = JSON.parse(JSON.stringify(old.g)), nextHost = setup(4);
+    nextHost.c.L.game = restored; nextHost.c.L.host = 'b'; nextHost.c.ME = 'b';
+    nextHost.c.skew = 2500; nextHost.advance(2000);
+    assert.equal(nextHost.game.tick(restored), false); assert.equal(restored.phase, phase);
+    nextHost.expire(); assert.equal(nextHost.game.tick(restored), true);
+    assert.equal(restored.phase, phase === 'wish' ? 'twist' : phase === 'twist' ? 'wish' : 'result');
+  }
+  // Older persisted result states without a deadline gain one exactly once.
+  const legacy = setup(4); await judge(legacy); await legacy.c.mpPick(0); legacy.game.tick(legacy.g);
+  legacy.g.deadline = 0; assert.equal(legacy.game.tick(legacy.g), true);
+  const restoredDeadline = legacy.g.deadline; assert.equal(legacy.game.tick(legacy.g), false);
+  assert.equal(legacy.g.deadline, restoredDeadline);
+
+  // The minimum applies throughout play; zero seats cannot create endless skipped rounds.
+  for (const phase of ['wish', 'twist', 'judge', 'result']) {
+    const few = setup(3);
+    if (phase === 'twist') { await few.c.mpSendWish('wish'); few.game.tick(few.g); }
+    if (phase === 'judge' || phase === 'result') await judge(few);
+    if (phase === 'result') { await few.c.mpPick(0); few.game.tick(few.g); }
+    few.c.P.b.gone = true;
+    assert.equal(few.game.tick(few.g), true); assert.equal(few.g.phase, 'over'); assert.equal(few.c.L.status, 'over');
+    assert.equal(few.game.tick(few.g), false);
+  }
+  const empty = setup(3); empty.c.P = {}; assert.equal(empty.game.tick(empty.g), true);
+  assert.equal(empty.g.phase, 'over'); assert.deepEqual(Array.from(empty.g.champions), []);
+  assert.equal(empty.game.tick(null), false);
+  const tiedEnd = setup(3); tiedEnd.g.scores.a = 2; tiedEnd.g.scores.b = 2; tiedEnd.c.P.c.gone = true;
+  tiedEnd.game.tick(tiedEnd.g); assert.deepEqual(Array.from(tiedEnd.g.champions), ['a', 'b']);
+  const manual = setup(3); manual.c.P.b.gone = true; manual.c.mpStartRound(manual.g);
+  assert.equal(manual.g.phase, 'over');
+
+  // New arrivals wait for the next round; stamped spectator actions cannot participate.
+  const join = setup(3); join.c.P.d = { joined: 4, name: 'Newcomer' };
+  await as(join.c, 'd', () => join.c.mpSendTwist('spectator')); assert.equal(join.writes.length, 0);
+  await join.c.mpSendWish('wish'); join.game.tick(join.g);
+  join.c.P.d.twist = { gid: join.g.gid, round: join.g.round, text: 'injected' };
+  for (const pid of ['b', 'c']) await as(join.c, pid, () => join.c.mpSendTwist(pid));
+  join.game.tick(join.g); assert.equal(join.g.order.length, 2); assert.ok(join.g.order.every(a => a.pid !== 'd'));
+  join.c.mpStartRound(join.g); assert.ok(join.g.seats.includes('d')); assert.equal(join.g.scores.d, 0);
+
+  // A departed author's index stays stable while the remaining players can still judge.
+  const stable = setup(5); await judge(stable); stable.c.P[stable.g.order[0].pid].gone = true;
+  stable.c.P.a.pick = { gid: stable.g.gid, round: stable.g.round, k: 0 };
+  assert.equal(stable.game.tick(stable.g), false);
+  await stable.c.mpPick(1); stable.game.tick(stable.g); assert.equal(stable.g.winner, 1);
+  const awarded = stable.g.scores[stable.g.order[1].pid]; stable.game.tick(stable.g);
+  assert.equal(stable.g.scores[stable.g.order[1].pid], awarded);
+
+  // Duplicate/empty client submissions never replace an accepted seat action.
+  const duplicates = setup(3);
+  await duplicates.c.mpSendWish('  first  '); await duplicates.c.mpSendWish('second');
+  assert.equal(duplicates.writes.length, 1); duplicates.game.tick(duplicates.g);
+  await as(duplicates.c, 'b', async () => {
+    await duplicates.c.mpSendTwist('   '); await duplicates.c.mpSendTwist('first twist'); await duplicates.c.mpSendTwist('replacement');
+  });
+  assert.equal(duplicates.writes.length, 2); assert.equal(duplicates.c.P.b.twist.text, 'first twist');
+  // No-limit wish and twist deadlines remain disabled even after a long wait.
+  const noLimit = setup(3, { mpTime: 0 }); await noLimit.c.mpSendWish('wish'); noLimit.game.tick(noLimit.g);
+  noLimit.advance(1e9); assert.equal(noLimit.g.deadline, 0); assert.equal(noLimit.game.tick(noLimit.g), false);
   // Render is UI and is checked in the browser; it escapes player text with esc().
   assert.equal(c.errors.length, 0);
   console.log('PASS Monkey Paw game logic');

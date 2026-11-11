@@ -13,8 +13,8 @@ const LANGS = { en: "English", de: "Deutsch", fr: "Français" };
 const SETTINGS = [
   { key: "target", icon: "trophy", label: "Points to win", min: 1, max: 20, step: 1, cap: 99, fmt: n => `${n} points` },
   { key: "rounds", icon: "repeat", label: "Round limit", min: 1, max: 30, step: 1, cap: 999, none: "∞", fmt: n => n ? `${n} rounds` : "No limit" },
-  { key: "pickTime", icon: "hourglass", label: "Time to pick cards", min: 10, max: 180, step: 5, cap: 3600, unit: "s", none: "∞", fmt: n => n ? `${n} seconds` : "No timer" },
-  { key: "judgeTime", icon: "gavel", label: "Time for the czar", min: 10, max: 180, step: 5, cap: 3600, unit: "s", none: "∞", fmt: n => n ? `${n} seconds` : "No timer" },
+  { key: "pickTime", icon: "hourglass", label: "Time to pick cards", min: 10, max: 180, step: 1, cap: 3600, unit: "s", none: "∞", fmt: n => n ? `${n} seconds` : "No timer" },
+  { key: "judgeTime", icon: "gavel", label: "Time for the czar", min: 10, max: 180, step: 1, cap: 3600, unit: "s", none: "∞", fmt: n => n ? `${n} seconds` : "No timer" },
   { key: "hand", icon: "cards", label: "Cards in hand", min: 3, max: 12, step: 1, cap: 30, fmt: n => `${n} cards` },
   { key: "next", icon: "skip", label: "Next round starts", min: 3, max: 30, step: 1, cap: 300, unit: "s", none: "Host", fmt: n => n ? `After ${n} seconds` : "When the host clicks" },
   { key: "maxPlayers", icon: "users", label: "Max players", min: 3, max: 10, step: 1, cap: 20, fmt: n => `${n} players` },
@@ -49,7 +49,18 @@ const FLAGS = {
   fr: `<svg viewBox="0 0 3 2" preserveAspectRatio="none" aria-hidden="true"><path d="M0 0h1v2H0z" fill="#002654"/><path d="M1 0h1v2H1z" fill="#fff"/><path d="M2 0h1v2H2z" fill="#CE1126"/></svg>`
 };
 let sliding = false;   // the host is dragging a setting slider: don't re-render it out from under them
-const settings = (s = L && L.settings) => ({ ...DEFAULTS, ...Object.assign({}, ...Object.values(GAMES).map(g => g.defaults)), ...s });
+function settings(s = L && L.settings) {
+  const base = { ...DEFAULTS, ...Object.assign({}, ...Object.values(GAMES).map(g => g.defaults)) }, out = { ...base, ...s };
+  for (const o of SETTINGS) {
+    const v = out[o.key];
+    out[o.key] = typeof v === "number" && Number.isFinite(v)
+      ? o.none && v === 0 ? 0 : Math.min(o.cap, Math.max(o.min, Math.floor(v))) : base[o.key];
+  }
+  if (!Object.hasOwn(GAMES, out.game)) out.game = "cah";
+  if (!Object.hasOwn(LANGS, out.lang)) out.lang = "en";
+  out.private = out.private === true;
+  return out;
+}
 const STALE_MS = 3 * 3600e3;      // open-lobby list hides lobbies idle longer than this
 const PRUNE_MS = 48 * 3600e3;     // lobbies idle longer than this get deleted when someone creates a lobby
 const EMPTY_MS = 60000;           // a lobby with nobody's page open this long gets closed
@@ -286,7 +297,7 @@ function adoptProfile(data) {
   if (behind) saveProfile();
   syncSeat();
 }
-const seatFields = () => ({ name: myName, face: profile.face, lvl: levelOf(profile.xp).lvl, uid });
+const seatFields = () => ({ name: myName, face: profile.face, lvl: levelOf(profile.xp).lvl, uid, owner: firebaseAccountUser || uid });
 
 /* Each player credits only themselves, from what the lobby document shows, once per round and once per game. */
 function earn() {
@@ -354,7 +365,7 @@ function setPresence(extra) {
 }
 function online(pid) {
   if (pid === ME || !room || !roomSince) return true;
-  return room.peers().some(p => p.presence && p.presence.pid === pid && p.presence.lobby === code);
+  return room.peers().some(p => p.presence && p.presence.pid === pid && p.presence.lobby === code && (!firebaseAccountUser || (P[pid] && (!P[pid].owner || p.presence.uid === P[pid].owner))));
 }
 function trackPresence() {
   if (!L || (room && !room.connected())) return;
@@ -419,7 +430,7 @@ async function createLobby() {
       if (!(await db.doc("lobbies/" + c).get()).exists) break;
     }
     const now = Date.now();
-    await db.doc("lobbies/" + c).set({ code: c, host: ME, hostName: myName, status: "lobby", rev: 1, count: 1, created: now, updated: now, settings: { ...settings(null), game: GAMES[homeGame] ? homeGame : "cah" }, game: null });
+    await db.doc("lobbies/" + c).set({ code: c, host: ME, hostUid: firebaseAccountUser || uid, hostSeen: hostStamp(), clockHost: ME, hostName: myName, status: "lobby", rev: 1, count: 1, created: now, updated: now, settings: { ...settings(null), game: GAMES[homeGame] ? homeGame : "cah" }, game: null });
     await enterLobby(c);
     pruneOldLobbies();
   } catch (e) { writeError(e); }
@@ -432,7 +443,7 @@ async function joinLobby(c) {
     const s = await db.doc("lobbies/" + c).get();
     if (!s.exists) return notice(`No lobby uses the code ${c}. Check the code with the host.`, { error: true });
     const ps = await db.collection(`lobbies/${c}/players`).get();
-    const max = Math.min(MAX_PLAYERS, (s.data().settings || {}).maxPlayers || MAX_PLAYERS);
+    const max = settings(s.data().settings).maxPlayers;
     if (ps.size >= max && !ps.docs.some(d => d.id === ME)) return notice(`Lobby ${c} is full (${max} players).`, { error: true });
     await enterLobby(c);
   } catch (e) { writeError(e); }
@@ -443,7 +454,7 @@ async function enterLobby(c) {
   if (s.exists) await me.update(seatFields());
   else await me.set({ ...seatFields(), joined: Date.now(), sub: null, pick: null });
   code = c; tab.set("cah-lobby", c);
-  seenLobby = false; seenSelf = false; leaving = false; L = null; P = {};
+  seenLobby = false; seenSelf = false; leaving = false; L = null; P = {}; skew = null; skewHost = null;
   for (const k in offlineSince) delete offlineSince[k];
   selected = []; czarPick = null; seenRev = 0; behindSince = 0; lagCount = 0;
   $("renameInput").value = myName; $("nameInput").value = myName;
@@ -492,20 +503,34 @@ async function leaveLobby() {
   try {
     if (isHost()) {
       const others = Object.keys(P).filter(pid => pid !== ME).sort(byJoined);
-      const next = others.find(pid => online(pid) && !gone(pid)) || others[0];
-      if (next) { L.host = next; L.hostName = nameOf(next); L.rev++; const body = clone(L); await savePiles(c, body); await db.doc("lobbies/" + c).set(body); }
-      else { await db.doc("lobbies/" + c).delete(); await db.doc("directory/" + c).delete(); }
+      const eligible = others.filter(pid => !L.hostUid || (typeof P[pid].owner === "string" && P[pid].owner));
+      const next = eligible.find(pid => online(pid) && !gone(pid)) || eligible[0];
+      if (next) {
+        await db.runTransaction(async tx => {
+          const ref = db.doc("lobbies/" + c), snap = await tx.get(ref);
+          if (snap.exists && snap.data().host === ME) {
+            const d = snap.data(), owner = P[next].owner;
+            if (d.hostUid && (d.hostUid !== (firebaseAccountUser || uid) || typeof owner !== "string" || !owner)) return;
+            const body = { ...d, host: next, hostName: nameOf(next), rev: (d.rev || 0) + 1, clockHost: d.clockHost || ME };
+            if (owner && d.hostUid) body.hostUid = owner; // Legacy successors keep the legacy room claimable.
+            tx.set(ref, body);
+          }
+        });
+      }
+      else if (!others.length) { await db.doc("directory/" + c).delete(); await db.doc("lobbies/" + c).delete(); }
     }
     await db.doc(`lobbies/${c}/players/${ME}`).delete();
   } catch (e) { writeError(e); }
   exitLobby("");
 }
 async function closeLobby(c) {
+  const lobby = await db.doc("lobbies/" + c).get();
+  if (!lobby.exists || (lobby.data().hostUid ? lobby.data().hostUid !== (firebaseAccountUser || uid) : lobby.data().host !== ME)) return;
   const ps = await db.collection(`lobbies/${c}/players`).get();
   for (const p of ps.docs) await db.doc(`lobbies/${c}/players/${p.id}`).delete();
   await db.doc(`lobbies/${c}/deck/piles`).delete().catch(() => {});
-  await db.doc("lobbies/" + c).delete();
   await db.doc("directory/" + c).delete();
+  await db.doc("lobbies/" + c).delete();
 }
 /* Lobbies abandoned for days get cleared out so the store doesn't fill up. */
 async function pruneOldLobbies() {
@@ -556,20 +581,26 @@ async function rename(e) {
 }
 
 /* ---------- host: the host's browser runs the rules and is the only writer of the lobby document ---------- */
-let writing = false, dirty = false, lastDir = "", lastDirAt = 0;
+let writing = false, dirty = false, lastDir = "", lastDirAt = 0, lastBeat = 0;
+const hostStamp = () => firebaseAccountUser ? firebase.firestore.FieldValue.serverTimestamp() : Date.now();
 async function commit() {
-  if (!isHost()) return;
+  if (!isHost() || leaving) return;
+  L.settings = settings(); L.clockHost = ME; L.hostUid = firebaseAccountUser || uid;
   L.rev = (L.rev || 0) + 1; L.updated = Date.now();
   dirty = true; render();
   if (writing) return;
   writing = true;
   try {
-    while (dirty && isHost()) {
+    while (dirty && isHost() && !leaving) {
       dirty = false;
       const c = code, body = clone(L);
       await savePiles(c, body);
-      await db.doc("lobbies/" + c).set(body);
-      await syncDirectory(c, body);
+      const saved = await db.runTransaction(async tx => {
+        const ref = db.doc("lobbies/" + c), snap = await tx.get(ref);
+        if (!snap.exists || snap.data().host !== ME || (snap.data().hostUid && snap.data().hostUid !== (firebaseAccountUser || uid)) || snap.data().rev >= body.rev) return false;
+        tx.set(ref, { ...body, hostSeen: hostStamp() }); return true;
+      });
+      if (saved) { lastBeat = Date.now(); await syncDirectory(c, body); }
     }
   } catch (e) { writeError(e); }
   finally { writing = false; }
@@ -584,28 +615,42 @@ async function syncDirectory(c, body) {
 }
 
 function hostTick() {
-  if (!isHost()) return;
-  let changed = false;
+  if (!isHost() || leaving || !seenSelf) return;
+  let changed = Date.now() - lastBeat > 10000;
   const count = Object.keys(P).length;
   if (L.count !== count) { L.count = count; changed = true; }
   if (P[ME] && L.hostName !== P[ME].name) { L.hostName = P[ME].name; changed = true; }
   const g = L.game;
-  if (L.status === "playing" && g) changed = (GAMES[g.type || "cah"] || curGame()).tick(g) || changed;
+  if (L.status === "playing" && g) {
+    const game = GAMES[g.type || "cah"] || curGame();
+    if (Object.keys(P).filter(present).length < game.min) { L.status = "lobby"; L.game = null; changed = true; }
+    else changed = game.tick(g) || changed;
+  }
   if (changed) commit();
 }
 function backToLobby() { if (!isHost()) return; L.status = "lobby"; L.game = null; commit(); }
 /* If the host's page has been gone a while, the longest-seated player still here takes over. */
-function maybeTakeOver(force) {
-  if (!L || isHost()) return;
+let takingOver = false;
+async function maybeTakeOver(force) {
+  if (!L || isHost() || takingOver || leaving || !P[ME]) return;
   if (!force) {
     if (!room || !roomSince || Date.now() - roomSince < 8000 || !gone(L.host)) return;
     const next = Object.keys(P).filter(pid => pid !== L.host && online(pid)).sort(byJoined)[0];
     if (next !== ME) return;
   }
-  L.host = ME; L.hostName = myName;
-  noteSkew(L);
-  notice("The host left, so you are hosting now.");
-  commit();
+  const c = code, oldHost = L.host, offset = skew || 0;
+  takingOver = true;
+  try {
+    await db.runTransaction(async tx => {
+      const ref = db.doc("lobbies/" + c), snap = await tx.get(ref);
+      if (!snap.exists || snap.data().host !== oldHost) return;
+      const d = clone(snap.data());
+      rebaseClock(d.game, offset);
+      Object.assign(d, { host: ME, hostUid: P[ME].owner, hostName: myName, clockHost: ME, updated: Date.now(), rev: (d.rev || 0) + 1 });
+      tx.set(ref, { ...d, hostSeen: hostStamp() });
+    });
+  } catch (e) { if (force || e.code !== "permission-denied") writeError(e); }
+  finally { takingOver = false; }
 }
 
 function afterChange() { trackPresence(); earn(); render(); hostTick(); }
@@ -683,20 +728,24 @@ function identicon(seed) {
 }
 /* Countdown from the host's deadline, corrected by the best clock offset seen from the host's writes. */
 let skew = null, skewHost = null;
+function rebaseClock(g, offset) {
+  if (g) for (const key of ["deadline", "startAt"]) if (typeof g[key] === "number" && g[key] > 0) g[key] += offset;
+}
 function noteSkew(d) {
+  const clockHost = d.clockHost || d.host;
   if (d.host === ME) {
-    // Every handoff reaches here before the new host clears its old clock offset.
-    const becameHost = !!L && skewHost !== ME;
-    if (becameHost && d.game) for (const key of ["deadline", "startAt"]) {
-      if (typeof d.game[key] === "number" && d.game[key] > 0) d.game[key] += skew || 0;
-    }
+    const becameHost = !!L && L.host !== ME;
+    if (becameHost && clockHost !== ME) rebaseClock(d.game, skew || 0);
     skew = 0; skewHost = ME;
     return becameHost;
   }
-  if (skewHost !== d.host) { skew = null; skewHost = d.host; }
+  // A voluntary handoff still carries the previous host's clocks until the successor writes.
+  if (clockHost !== d.host) return;
+  if (skewHost !== clockHost) { skew = null; skewHost = clockHost; }
   const s = Date.now() - (d.updated || 0);
   if (Math.abs(s) < 3600e3 && (skew == null || s < skew)) skew = s;
 }
+
 const TIMER_LBL = { pick: "to pick", wish: "to wish", twist: "to twist", write: "to write", rate: "to rate" };
 function updateTimer() {
   const el = $("timer"), g = L && L.game;
@@ -704,7 +753,8 @@ function updateTimer() {
   el.hidden = !live;
   if (!live) return;
   const left = Math.max(0, Math.ceil((g.deadline + (skew || 0) - Date.now()) / 1000));
-  el.innerHTML = `${ICONS.clock}${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}<span class="lbl"> ${TIMER_LBL[g.phase] || (g.type === "mp" ? "for the wisher" : "for the czar")}</span>`;
+  const face = GAMES[g.type] && GAMES[g.type].clock;   // a game can draw its own clock face
+  el.innerHTML = `${face ? face(g, left) : ICONS.clock}${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}<span class="lbl"> ${TIMER_LBL[g.phase] || (g.type === "mp" ? "for the wisher" : "for the czar")}</span>`;
   el.classList.toggle("urgent", left <= 10);
 }
 const at = pid => `<strong>@${esc(nameOf(pid))}</strong>`;
@@ -1027,7 +1077,7 @@ function renderLobby() {
       ${open ? `${k.hint ? `<p class="hint">${k.hint}</p>` : ""}<div class="pchips">${list.map(p => `<label class="pchip" title="${packBy(p)} · ${p.black.length} black · ${p.white.length} white">
         <input type="checkbox" id="pk-${esc(p.id)}" data-pack="${esc(p.id)}" ${chosen.has(p.id) ? "checked" : ""} ${off}><span>${esc(p.name)}</span></label>`).join("")}</div>` : ""}</li>`;
   }).join("");
-  const fields = keys => keys.map(k => SETTINGS.find(o => o.key === k)).map(o => {
+  const fields = (keys, labels = {}) => keys.map(k => SETTINGS.find(o => o.key === k)).map(o => labels[o.key] ? { ...o, label: labels[o.key] } : o).map(o => {
     const n = s[o.key], top = o.none ? o.max + o.step : o.max, at = slideAt(o, n);
     return `<div class="slide"><span class="slide-ic" data-tip="${o.label}">${ICONS[o.icon]}</span>
       <input type="range" id="set-${o.key}" data-setting="${o.key}" min="${o.min}" max="${top}" step="${o.step}" value="${at}" style="--p:${(at - o.min) / (top - o.min) * 100}%"
@@ -1041,11 +1091,11 @@ function renderLobby() {
       <label class="slide toggle ${host ? "" : "disabled"}"><span class="slide-ic" data-tip="Only friends with the code can find you">${ICONS.lock}</span>
         <span class="row-title">Private table</span><input type="checkbox" id="set-private" data-setting="private" ${s.private ? "checked" : ""} ${off}></label></fieldset>`;
   const body = gid === "mp" ? `${rules(["target", "maxPlayers"])}
-    <fieldset class="setting-section"><legend>${ICONS.clock}Timers</legend><div class="settings-grid">${fields(["mpTime", "next"])}</div></fieldset>
-    <fieldset class="setting-section"><legend>${ICONS.paw}Wish deck</legend>${lang}<p class="hint">The wisher can draw one of three wishes or type their own.</p></fieldset>`
+    <fieldset class="setting-section"><legend>${ICONS.clock}Timers</legend><div class="settings-grid">${fields(["mpTime", "judgeTime", "next"], { judgeTime: "Time to choose a twist" })}</div></fieldset>
+    <fieldset class="setting-section"><legend>${ICONS.paw}Wish deck</legend>${lang}</fieldset>`
     : gid === "sd" ? `${rules(["target", "maxPlayers"])}
     <fieldset class="setting-section"><legend>${ICONS.heart}The date</legend><div class="settings-grid">${fields(["sdCount", "sdEvery", "sdWrite", "next"])}</div>
-      ${lang}<p class="hint">Listeners secretly add one trait each, up to half the date. The rest is drawn at random. The best speaker of each lap scores.</p></fieldset>`
+      ${lang}</fieldset>`
     : "";
   const picker = `<div class="game-tiles compact" role="radiogroup" aria-label="Game">${gameTiles("set-game", gid, !host)}</div>`;
   if (!sliding && !(document.activeElement && document.activeElement.dataset.num)) $("lobbySettings").innerHTML = picker + (body || `
@@ -1202,7 +1252,7 @@ document.addEventListener("change", e => { if (e.target.dataset.homeGame !== und
 document.addEventListener("change", e => {
   if (!isHost() || L.status !== "lobby") return;
   const key = e.target.dataset.setting;
-  if (key) { L.settings = { ...settings(), [key]: key === "private" ? e.target.checked : key === "lang" || key === "game" ? e.target.value : slideValue(e.target) }; sliding = false; commit(); }
+  if (key) { L.settings = { ...settings(), [key]: key === "private" ? e.target.checked : key === "lang" || key === "game" ? e.target.value : slideValue(e.target) }; sliding = false; if (key === "game") L.game = null; commit(); }
   else if (e.target.dataset.num) {
     const o = SETTINGS.find(o => o.key === e.target.dataset.num), n = parseInt(e.target.value, 10);
     const v = n > 0 ? Math.min(o.cap, Math.max(o.min, n)) : o.none ? 0 : settings()[o.key];
@@ -1397,6 +1447,12 @@ function tableSide(g, { chip, won, empty }) {
     ? (phase === "over" ? "" : `<button class="btn small icon" type="button" data-act="skip" data-tip="Skip round" aria-label="Skip round">${ICONS.skip}</button><button class="btn small danger icon" type="button" data-act="end" data-tip="End game" aria-label="End game">${ICONS.stop}</button>`)
     : !room ? `<button class="btn small" type="button" data-act="take-over">${ICONS.crown}Host not responding? Take over</button>` : "";
 }
+/* Who the round is waiting on: a face per seat, marked once they are done; `mark` is the done badge. */
+function tableRoster(pids, done, label, mark = ICONS.check) {
+  return `<div class="roster-head"><span>${label}</span><b>${pids.filter(done).length}/${pids.length}</b></div>
+    <ul class="roster">${pids.map(pid => `<li class="${done(pid) ? "done" : "wait"}">${avHTML(lookOf(pid), "md", false)}<i class="mk" aria-hidden="true">${done(pid) ? mark : "<b></b><b></b><b></b>"}</i>
+      <span>${pid === ME ? "You" : `@${esc(nameOf(pid))}`}<span class="vh">${done(pid) ? ", done" : ", waiting"}</span></span></li>`).join("")}</ul>`;
+}
 function tableOverStatus(g) {
   const champs = g.champions || [], pts = plural(champs.length ? g.scores[champs[0]] || 0 : 0, "point", "points");
   if (!champs.length) return "Game over. Nobody scored. Everyone loses.";
@@ -1430,5 +1486,6 @@ document.addEventListener("keydown", e => {
 });
 function renderGame() {
   const g = L && L.game;
+  $("viewGame").dataset.game = (g && g.type) || "cah";   // scopes each game's look in the stylesheet
   if (g) (GAMES[g.type || "cah"] || curGame()).render(g);
 }

@@ -4,7 +4,40 @@
       ".read": "auth != null",
       "$key": {
         ".write": "auth != null && (!data.exists() || data.child('uid').val() === auth.uid)",
-        ".validate": "newData.child('uid').val() === auth.uid && newData.hasChild('pid')"
+        ".validate": "newData.hasChildren(['uid', 'pid', 't', 'rev']) && newData.child('uid').val() === auth.uid && newData.child('pid').isString() && newData.child('pid').val().matches(/^p[a-z0-9]{12}$/) && (!newData.child('lobby').exists() || (newData.child('lobby').isString() && newData.child('lobby').val().matches(/^[A-Z]{4}$/))) && newData.child('t').isNumber() && newData.child('rev').isNumber()",
+        "uid": {
+          ".validate": true
+        },
+        "pid": {
+          ".validate": true
+        },
+        "lobby": {
+          ".validate": true
+        },
+        "t": {
+          ".validate": true
+        },
+        "rev": {
+          ".validate": true
+        },
+        "look": {
+          ".validate": "newData.hasChildren(['gid', 'round', 'k'])",
+          "gid": {
+            ".validate": "newData.isString() && newData.val().length <= 64"
+          },
+          "round": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "k": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 400"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
       }
     }
   }

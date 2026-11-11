@@ -37,26 +37,81 @@ service cloud.firestore {
       allow write: if signedIn() && (request.auth.uid == uid || linkedTo(uid));
     }
 
-    // Lobbies: the host's browser writes the lobby, each player writes their own seat
-    // (the host may also remove seats), so any signed-in browser may write here.
+    function host(code) {
+      return signedIn() && (!exists(/databases/$(database)/documents/lobbies/$(code))
+        || !('hostUid' in get(/databases/$(database)/documents/lobbies/$(code)).data)
+        || get(/databases/$(database)/documents/lobbies/$(code)).data.hostUid == request.auth.uid);
+    }
+    function ownsSeat(code, pid) {
+      return get(/databases/$(database)/documents/lobbies/$(code)/players/$(pid)).data.owner == request.auth.uid;
+    }
+    function action(a, kind) {
+      return a == null || (a is map && a.gid is string && a.gid.size() <= 64
+        && a.round is int && a.round >= 0
+        && (kind == 'text' ? a.keys().hasOnly(['gid', 'round', 'text']) && a.text is string && a.text.size() <= 200
+          : kind == 'pick' ? a.keys().hasOnly(['gid', 'round', 'k']) && a.k is int && a.k >= 0 && a.k < 400
+          : kind == 'rate' ? a.keys().hasOnly(['gid', 'round', 'v']) && a.v is int && a.v >= 1 && a.v <= 5
+          : kind == 'sub' ? a.keys().hasOnly(['gid', 'round', 'cards']) && a.cards is list && a.cards.size() <= 3 && a.cards.join('').size() <= 450
+          : a.keys().hasOnly(['gid', 'round', 'ks']) && a.ks is list && a.ks.size() <= 20 && a.ks.hasOnly([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19])));
+    }
+    function seat(d) {
+      return d.keys().hasOnly(['owner', 'uid', 'name', 'face', 'lvl', 'joined', 'sub', 'pick', 'reveal', 'wish', 'twist', 'trait', 'rate'])
+        && d.owner == request.auth.uid && d.name is string && d.name.size() <= 20
+        && (d.uid == null || (d.uid is string && d.uid.size() <= 128))
+        && d.joined is number && d.lvl is number && d.lvl >= 1 && d.lvl <= 1000000
+        && d.face is map && d.face.keys().hasOnly(['s', 'k', 'e', 'a', 'b'])
+        && d.face.s is int && d.face.s >= 0 && d.face.s < 10
+        && d.face.k is int && d.face.k >= 0 && d.face.k < 10
+        && d.face.e is int && d.face.e >= 0 && d.face.e < 6
+        && d.face.a is int && d.face.a >= 0 && d.face.a < 8
+        && d.face.b is int && d.face.b >= 0 && d.face.b < 6
+        && action(d.get('wish', null), 'text') && action(d.get('twist', null), 'text')
+        && action(d.get('trait', null), 'text') && action(d.get('pick', null), 'pick')
+        && action(d.get('rate', null), 'rate') && action(d.get('sub', null), 'sub') && action(d.get('reveal', null), 'reveal');
+    }
     match /lobbies/{code} {
       allow read: if signedIn();
-      allow write: if signedIn() && code.matches('^[A-Z]{4}$');
+      allow create: if signedIn() && code.matches('^[A-Z]{4}$')
+        && ((!('hostUid' in request.resource.data) && !('hostSeen' in request.resource.data))
+          || (request.resource.data.hostUid == request.auth.uid && request.resource.data.hostSeen == request.time));
+      allow update: if signedIn() && code.matches('^[A-Z]{4}$')
+        // Missing ownership marks a legacy room. Preserve old writes until a device claims it.
+        && ((!('hostUid' in resource.data)
+            && (!('hostUid' in request.resource.data)
+              || (request.resource.data.hostUid == request.auth.uid && request.resource.data.hostSeen == request.time)))
+          || (resource.data.hostUid == request.auth.uid
+          && ((request.resource.data.host == resource.data.host && request.resource.data.hostUid == resource.data.hostUid && request.resource.data.hostSeen == request.time)
+            || (request.resource.data.host != resource.data.host
+              && request.resource.data.hostUid == get(/databases/$(database)/documents/lobbies/$(code)/players/$(request.resource.data.host)).data.owner
+              && request.resource.data.hostSeen == resource.data.hostSeen)))
+          || (ownsSeat(code, request.resource.data.host) && request.resource.data.hostUid == request.auth.uid
+            && resource.data.hostSeen + duration.value(30, 's') < request.time
+            && request.resource.data.hostSeen == request.time
+            && request.resource.data.rev == resource.data.rev + 1
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['host', 'hostUid', 'hostName', 'hostSeen', 'clockHost', 'updated', 'rev', 'game'])
+            && (request.resource.data.game == resource.data.game
+              || request.resource.data.game.diff(resource.data.game).affectedKeys().hasOnly(['deadline', 'startAt']))));
+      allow delete: if code.matches('^[A-Z]{4}$') && host(code);
       match /players/{pid} {
         allow read: if signedIn();
-        allow write: if signedIn() && pid.matches('^p[a-z0-9]{12}$');
+        allow create: if signedIn() && pid.matches('^p[a-z0-9]{12}$') && (!('owner' in request.resource.data) || seat(request.resource.data))
+          && exists(/databases/$(database)/documents/lobbies/$(code));
+        allow update: if signedIn() && pid.matches('^p[a-z0-9]{12}$')
+          && ((!('owner' in resource.data)
+              && (!('owner' in request.resource.data) || request.resource.data.owner == request.auth.uid))
+            || (resource.data.owner == request.auth.uid && seat(request.resource.data)
+              && request.resource.data.joined == resource.data.joined));
+        allow delete: if signedIn() && pid.matches('^p[a-z0-9]{12}$')
+          && (!('owner' in resource.data) || resource.data.owner == request.auth.uid || host(code));
       }
-      // The game's draw and discard piles, kept out of the lobby document so players don't download them on every change.
       match /deck/{doc} {
         allow read: if signedIn();
-        allow write: if signedIn() && doc == 'piles';
+        allow write: if doc == 'piles' && host(code);
       }
     }
-
-    // Open-lobby list shown on the home screen.
     match /directory/{code} {
       allow read: if signedIn();
-      allow write: if signedIn() && code.matches('^[A-Z]{4}$');
+      allow write: if code.matches('^[A-Z]{4}$') && host(code);
     }
 
     // Card packs written by players.

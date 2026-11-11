@@ -75,12 +75,7 @@ function sdBuildTraits(g) {
   }
   const cats = Object.keys(pool).filter(cat => !fixed.includes(cat));
   for (const cat of shuffle(cats)) { if (traits.length >= g.count - players.length) break; draw(cat); }
-  /* Exhaust distinct categories first; larger counts can reuse categories, never text. */
-  while (traits.length < g.count - players.length) {
-    const available = Object.keys(pool).filter(cat => values(cat).length);
-    if (!available.length) break;
-    draw(shuffle(available)[0]);
-  }
+  /* A small pool makes a shorter date; never repeat a deck category. */
   for (const t of players) traits.splice(Math.min(3, traits.length) + Math.floor(Math.random() * (Math.max(0, traits.length - 3) + 1)), 0, t);
   const twist = traits.findIndex(t => t.cat === "dealbreaker_twist");
   if (twist >= 0) traits.push(...traits.splice(twist, 1));
@@ -88,11 +83,11 @@ function sdBuildTraits(g) {
 }
 function sdFinishTurn(g) {
   const votes = sdListeners(g).map(pid => sdValue(g, pid, "rate")).filter(v => v !== null);
-  const avg = votes.length ? Math.round(votes.reduce((a, b) => a + b, 0) / votes.length * 100) / 100 : null;
+  const avg = votes.length ? votes.reduce((a, b) => a + b, 0) / votes.length : null;
   g.turns[g.round] = { pid: g.speaker, avg, n: votes.length };
   if (!g.cycle.includes(g.speaker)) g.cycle.push(g.speaker);
   g.cycleWinners = [];
-  Object.assign(g, { phase: "result", deadline: 0 });
+  Object.assign(g, { phase: "result", deadline: settings().next ? sdNow() + settings().next * 1000 : 0 });
   sdCloseCycle(g, Object.keys(P).filter(present));
 }
 function sdCloseCycle(g, seats) {
@@ -113,15 +108,13 @@ function sdEndGame(g, champions) {
   }
   Object.assign(g, { phase: "over", champions, deadline: 0 }); L.status = "over";
 }
-let sdNextTimer = null, sdNextKey = "";
 function sdScheduleNext(g) {
-  const key = g.gid + ":" + g.round, delay = settings().next;
-  if (sdNextKey === key || !delay) return;
-  sdNextKey = key; clearTimeout(sdNextTimer);
-  sdNextTimer = setTimeout(() => {
-    const cur = L && L.game;
-    if (isHost() && L.status === "playing" && cur && cur.type === "sd" && cur.gid + ":" + cur.round === key && cur.phase === "result") { sdStartRound(cur); commit(); }
-  }, delay * 1000);
+  if (!g.deadline) {
+    if (!settings().next) return false;
+    g.deadline = sdNow() + settings().next * 1000; return true;
+  }
+  if (sdNow() < g.deadline) return false;
+  sdStartRound(g); return true;
 }
 function sdCheck(players, s) {
   if (players.length < 2) return { ok: false, why: `Waiting for players: ${players.length} of 2 needed.` };
@@ -143,32 +136,54 @@ function sdTick(g) {
     g.traits = sdBuildTraits(g);
     Object.assign(g, { phase: "reveal", startAt: sdNow() + 3000, deadline: 0 }); return true;
   }
-  if (g.phase === "reveal" && sdNow() >= g.startAt + g.count * g.every * 1000 + 3000) {
+  if (g.phase === "reveal" && sdNow() >= g.startAt + g.traits.length * g.every * 1000 + 3000) {
     Object.assign(g, { phase: "rate", deadline: sdNow() + 30000 }); return true;
   }
   if (g.phase === "rate" && (late || sdListeners(g).every(pid => sdValue(g, pid, "rate") !== null))) { sdFinishTurn(g); return true; }
-  if (g.phase === "result") sdScheduleNext(g);
+  if (g.phase === "result") return sdScheduleNext(g);
   return false;
 }
 /* ---------- Speed Date table ---------- */
+/* A late-night dating show: the speaker in the spotlight, one trait card flipping in at a time, the table holding up score paddles. */
 const SD_RATES = [[1, "Dead air"], [2, "Awkward"], [3, "Decent"], [4, "Funny"], [5, "Iconic"]];
-let sdLastKey = "", sdFrame = "";
-function sdDateCard(g, n) {
-  const host = sdNow(), phase = g.phase, total = g.traits.length || g.count;
-  const sp = g.speaker === ME ? "Your date" : `@${esc(nameOf(g.speaker))}'s date`;
-  const count = phase === "reveal" && host < g.startAt ? Math.max(1, Math.ceil((g.startAt - host) / 1000)) : 0;
-  const after = phase === "result" || phase === "over";
-  const rows = Array.from({ length: total }, (_, i) => {
-    const t = g.traits[i];
-    if (!t || i >= n) return `<li class="trait hidden"><span class="tr-n">${String(i + 1).padStart(2, "0")}</span><span class="tr-q">???</span></li>`;
-    const by = t.by ? (after ? `<span class="tr-by">${avHTML(lookOf(t.by), "sm")}@${esc(nameOf(t.by))}</span>` : `<span class="tr-by">${ICONS.pencil}a player</span>`) : "";
-    return `<li class="trait ${i === n - 1 && phase === "reveal" ? "new" : ""}"><span class="tr-n">${String(i + 1).padStart(2, "0")}</span><span class="tr-t">${esc(t.text)}</span>${by}</li>`;
-  }).join("");
-  const next = sdNextAt(g), since = next ? g.every * 1000 - (next - host) : 0;
-  const bar = phase === "reveal" && !count && next ? `<div class="date-bar" aria-hidden="true"><i style="--dur:${g.every}s;--since:-${Math.max(0, since)}ms"></i></div>` : "";
-  return `<article class="date-card ${phase}"><header><span class="date-ic">${ICONS.heart}</span><span><b>${sp}</b><small>${Math.min(n, total)} of ${total} revealed</small></span></header>
-    ${count ? `<div class="date-count" aria-live="assertive"><b>${count}</b><span>Start talking on zero</span></div>` : ""}
-    <ol class="traits">${rows}</ol>${bar}</article>`;
+let sdLastKey = "", sdFrame = "", sdShown = -1;
+const sdPad = n => String(n).padStart(2, "0");
+const sdWord = avg => SD_RATES[Math.max(0, Math.min(4, Math.round(avg) - 1))][1];
+const sdCount = g => g.phase === "reveal" && sdNow() < g.startAt ? Math.max(1, Math.ceil((g.startAt - sdNow()) / 1000)) : 0;
+function sdNextIn(g) {
+  const next = sdNextAt(g);
+  return next && !sdCount(g) ? Math.max(1, Math.ceil((next - sdNow()) / 1000)) : 0;
+}
+/* The traits so far as tags; the ones still to come as empty slots. */
+function sdChips(g, upto, slots, after) {
+  return `<ul class="sd-chips">${g.traits.slice(0, upto).map(t => `<li class="${t.by ? "own" : ""}">${t.by ? ICONS.pencil : ""}${esc(t.text)}${after && t.by
+    ? `<span class="sd-by">${avHTML(lookOf(t.by), "sm", false)}@${esc(nameOf(t.by))}</span>` : ""}</li>`).join("")}${Array.from({ length: slots }, () => `<li class="todo" aria-hidden="true"></li>`).join("")}</ul>`;
+}
+function sdSet(g, n) {
+  const phase = g.phase, sp = g.speaker, total = g.traits.length || g.count, cd = sdCount(g), after = phase === "result" || phase === "over";
+  const air = { write: "Getting ready", reveal: cd ? "Going live" : "On air", rate: "The verdict" }[phase] || "Off air";
+  const head = `<header class="sd-spot">${avHTML(lookOf(sp), "lg", false)}<div><span class="sd-air"><i></i>${air}</span>
+    <b>${sp === ME ? "You" : `@${esc(nameOf(sp))}`}</b></div><span class="sd-no">Date ${g.round}</span></header>`;
+  let body = "";
+  if (phase === "write") body = `<p class="sd-meta">${total} traits, one every ${g.every}s</p>${sdChips(g, 0, total)}`;
+  else if (phase === "reveal") {
+    const t = g.traits[n - 1], flip = !cd && n !== sdShown;
+    sdShown = cd ? -1 : n;
+    const next = sdNextIn(g), since = next ? g.every * 1000 - (sdNextAt(g) - sdNow()) : 0;
+    body = cd ? `<div class="sd-now count"><b>${cd}</b><span>${sp === ME ? "Start talking on zero" : "Going live"}</span></div>`
+      : `<div class="sd-now${flip ? " flip" : ""}"><span class="sd-k">${sdPad(n)}<small>/${sdPad(total)}</small></span>
+        <p class="sd-trait${t.text.length > 28 ? " long" : ""}">${esc(t.text)}</p>${t.by ? `<span class="sd-from">${ICONS.pencil}Written by someone here</span>` : ""}</div>
+        ${next ? `<div class="sd-next" aria-hidden="true"><span class="bar"><i style="--dur:${g.every}s;--since:-${Math.max(0, since)}ms"></i></span><span>Next in <b>${next}</b></span></div>`
+        : `<div class="sd-next last"><span>Last one. Bring it home.</span></div>`}`;
+    body += sdChips(g, cd ? 0 : n - 1, cd ? total : total - n);
+  } else {
+    const turn = g.turns[g.round];
+    if (after && turn && turn.pid === sp) body = turn.avg === null ? `<div class="sd-score none"><b>-</b><em>Nobody rated</em></div>`
+      : `<div class="sd-score"><b>${turn.avg.toFixed(1)}</b><span>/5</span><em>${sdWord(turn.avg)}</em><small>${plural(turn.n, "rating", "ratings")}</small></div>`;
+    body += sdChips(g, g.traits.length, 0, after);
+  }
+  if (phase !== "reveal") sdShown = -1;
+  return `<article class="sd-set ${phase}">${head}${body}</article>`;
 }
 function sdRender(g) {
   const phase = g.phase, sp = g.speaker, iSpeak = sp === ME, role = sdRole(), host = isHost(), cfg = settings();
@@ -176,34 +191,31 @@ function sdRender(g) {
   if (fresh) sdLastKey = key;
   const n = sdVisible(g), lst = g.seats.filter(pid => pid !== sp && present(pid));
   const wrote = pid => !!sdValue(g, pid, "trait"), rated = pid => sdValue(g, pid, "rate") !== null;
-  const turn = g.turns[g.round], myT = sdMyTrait(), myR = sdMyRate();
-  sdFrame = n + ":" + (phase === "reveal" && sdNow() < g.startAt ? Math.ceil((g.startAt - sdNow()) / 1000) : 0);
+  const myT = sdMyTrait(), myR = sdMyRate();
+  sdFrame = n + ":" + sdCount(g);
 
   $("roundInfo").textContent = `Date ${g.round} · first to ${cfg.target}`;
-  $("rulesLine").textContent = `${g.count} traits, one every ${g.every}s. The best speaker of each lap gets a point.`;
+  $("rulesLine").textContent = `${g.traits.length || g.count} traits, one every ${g.every}s. The best speaker of each lap gets a point.`;
   updateTimer();
-  $("stage").classList.toggle("fresh", fresh && phase === "reveal");
-  $("blackCard").innerHTML = phase === "write" ? `<article class="date-card write"><header><span class="date-ic">${ICONS.heart}</span><span><b>${iSpeak ? "Your date" : `@${esc(nameOf(sp))}'s date`}</b><small>is getting ready</small></span></header>
-    <p class="date-wait">${iSpeak ? "Warm up your voice. Once the first trait shows, you talk and you don't stop." : "Slip in a trait they won't see coming."}</p></article>` : sdDateCard(g, n);
+  $("stage").classList.toggle("fresh", fresh);
+  $("blackCard").innerHTML = sdSet(g, n);
 
   let status;
-  if (role === "spectator" && phase !== "over") status = `You joined mid-date. You're in from the next one. ${at(sp)} is in the hot seat.`;
-  else if (phase === "write") status = iSpeak ? `You're in the hot seat. The others are secretly adding traits to your date<span class="dots"></span>`
-    : myT ? `Trait sent. ${lst.filter(p => !wrote(p)).length ? `Waiting on ${lst.filter(p => !wrote(p)).map(at).join(", ")}.` : `Your date is on the way<span class="dots"></span>`}`
-    : `${at(sp)} is going on a blind date. Write one thing about the date.`;
-  else if (phase === "reveal") status = iSpeak ? `<strong class="loud">Keep talking!</strong> React to every trait out loud. Silence loses.` : `Listen to ${at(sp)} talk their way through it. Rating opens when the date ends.`;
-  else if (phase === "rate") status = iSpeak ? `The date is over. The table is rating you<span class="dots"></span>` : myR ? `Rated ${myR}/5. Waiting on the others.` : `How did ${at(sp)} do? Be honest. Be cruel.`;
+  if (role === "spectator" && !["result", "over"].includes(phase)) status = `<b class="cue">Watching.</b> You're in from the next date.`;
+  else if (phase === "write") status = iSpeak ? `<b class="cue">You're in the hot seat.</b> The table is writing your date.`
+    : myT ? `<b class="cue">Trait sent.</b> Act natural.` : `<b class="cue">Set ${at(sp)} up.</b> Write one secret trait for their date.`;
+  else if (phase === "reveal") status = iSpeak ? (sdCount(g) ? `<b class="cue">Get ready.</b> Talk from zero and don't stop.` : `<b class="cue loud">Keep talking.</b> React to every trait out loud.`)
+    : `<b class="cue">Listen.</b> You rate ${at(sp)} when the date ends.`;
+  else if (phase === "rate") status = iSpeak ? `<b class="cue">The verdict.</b> The table is rating you<span class="dots"></span>`
+    : myR ? `<b class="cue">You gave ${myR}.</b> You can change it until everyone's in.` : `<b class="cue">Rate ${at(sp)}.</b> Be honest. Be cruel.`;
   else if (phase === "result") {
-    status = turn && turn.avg !== null ? `${iSpeak ? "You" : at(sp)} scored <strong>${turn.avg.toFixed(1)}/5</strong> from ${plural(turn.n, "rating", "ratings")}.` : `Nobody rated ${iSpeak ? "you" : at(sp)}.`;
-    if (g.cycleWinners.length) status += ` Lap over: ${g.cycleWinners.map(p => p === ME ? "you" : at(p)).join(" and ")} +1.`;
-    status += cfg.next ? " Next date in a few seconds." : host ? " Click Next round when everyone is ready." : " Waiting for the host to start the next date.";
-  } else status = tableOverStatus(g);
+    status = g.cycleWinners.length ? `<b class="cue">Lap over.</b> +1 to ${g.cycleWinners.map(p => p === ME ? "you" : at(p)).join(" and ")}.`
+      : `<b class="cue">${iSpeak ? "Your" : `${at(sp)}'s`} date is over.</b>`;
+    if (!cfg.next) status += host ? " Start the next date when you're ready." : " Waiting for the host.";
+  } else status = `<span class="over">${tableOverStatus(g)}</span>`;
   $("status").innerHTML = status;
 
-  if (phase === "write" || phase === "rate") {
-    const done = phase === "write" ? wrote : rated, word = phase === "write" ? "wrote a trait" : "rated";
-    $("pile").innerHTML = `<div class="pile-label">${lst.filter(done).length} of ${lst.length} ${word}</div><div class="slots">${lst.map(p => done(p) ? `<div class="slot down">Party<br>Games.</div>` : `<div class="slot" aria-hidden="true"></div>`).join("")}</div>`;
-  } else $("pile").innerHTML = "";
+  $("pile").innerHTML = phase === "write" ? tableRoster(lst, wrote, "Traits in") : phase === "rate" ? tableRoster(lst, rated, "Votes in") : "";
 
   tableSide(g, {
     won: pid => phase === "over" ? (g.champions || []).includes(pid) : phase === "result" && g.cycleWinners.includes(pid),
@@ -213,43 +225,40 @@ function sdRender(g) {
     empty: "No laps finished yet. The best talkers land here."
   });
 
-  let title = "", hint = "", body = "", action = "";
-  if (phase === "write") {
-    title = iSpeak ? "Hot seat" : "Your secret trait";
-    if (role === "listener" && !myT) {
-      hint = "One short trait. It shows up somewhere after the first three.";
-      body = composer("sdForm", key, "Your date", "…still lives with their ex", 60);
+  let title = "", hint = "", body = "", action = "", idle = false;
+  if (phase === "write" && role === "listener") {
+    title = myT ? "Your trait" : "Your secret trait";
+    hint = myT ? "In the deck. It drops after the first three." : "One short trait. It drops after the first three.";
+    if (myT) body = `<p class="sd-mine">${ICONS.pencil}${esc(myT)}</p>`;
+    else {
+      body = composer("sdForm", key, "Your date", "still lives with their ex", 60);
       action = `<button class="btn primary" type="submit" form="sdForm">${ICONS.send}Add trait</button>`;
-    } else if (myT) { hint = "In the deck. Act natural."; body = `<p class="trait-mine">${ICONS.pencil}${esc(myT)}</p>`; }
-    else hint = "Get ready. Traits drop one at a time and you talk the whole way through.";
-  } else if (phase === "reveal") {
-    title = iSpeak ? "Keep talking" : "Listen";
-    hint = iSpeak ? "Don't stop. Don't pause. Don't apologise." : "Rating opens when the last trait is out.";
-  } else if (phase === "rate") {
-    title = iSpeak ? "Judgement" : "Rate the date";
-    if (role === "listener") {
-      hint = "Tap a score. You can change it until everyone has voted.";
-      body = `<div class="rates" role="radiogroup" aria-label="Rate @${esc(nameOf(sp))}">${SD_RATES.map(([v, l]) => `<button type="button" class="rate ${myR === v ? "on" : ""}" data-sd-rate="${v}" role="radio" aria-checked="${myR === v}"><b>${v}</b><span>${l}</span></button>`).join("")}</div>`;
-    } else hint = "No peeking. Ratings are anonymous.";
-  } else {
+    }
+  } else if (phase === "rate" && role === "listener") {
+    title = `Rate @${nameOf(sp)}`;
+    body = `<div class="sd-paddles" role="radiogroup" aria-label="Rate @${esc(nameOf(sp))}">${SD_RATES.map(([v, l]) => `<button type="button" class="paddle${myR === v ? " on" : ""}" data-sd-rate="${v}" role="radio" aria-checked="${myR === v}" aria-label="${v}: ${l}" title="${v}: ${l}"><b>${v}</b><span>${l}</span></button>`).join("")}</div>`;
+  } else if (phase === "result" || phase === "over") {
     title = "Dates so far";
-    hint = "Average rating per date.";
-    body = `<ol class="turns">${Object.entries(g.turns).sort((a, b) => b[0] - a[0]).slice(0, 12).map(([r, t]) => `<li class="${+r === g.round ? "now" : ""}">${avHTML(lookOf(t.pid), "sm")}<span>@${esc(nameOf(t.pid))}</span><span class="tr-score">${t.avg === null ? "no ratings" : `${t.avg.toFixed(1)}<small>/5</small>`}</span></li>`).join("")}</ol>`;
+    body = `<ol class="sd-turns">${Object.entries(g.turns).sort((a, b) => b[0] - a[0]).slice(0, 12).map(([r, t]) => `<li class="${+r === g.round ? "now" : ""}">${avHTML(lookOf(t.pid), "sm", false)}
+      <span class="nm">${t.pid === ME ? "You" : `@${esc(nameOf(t.pid))}`}</span><span class="bar" aria-hidden="true"><i style="width:${t.avg === null ? 0 : t.avg * 20}%"></i></span>
+      <b>${t.avg === null ? "-" : t.avg.toFixed(1)}</b></li>`).join("")}</ol>`;
     if (phase === "result" && host) action = `<button class="btn primary" type="button" data-act="next">Next date${ICONS.arrowR}</button>`;
     if (phase === "over") action = host ? `<button class="btn primary" type="button" data-act="again">${ICONS.arrowL}Back to lobby</button>` : `<span class="hint">Waiting for the host to start another game.</span>`;
-  }
+  } else idle = true;
   $("trayWrap").classList.toggle("fresh", fresh);
+  $("trayWrap").classList.toggle("idle", idle);
   $("trayTitle").textContent = title;
   $("trayHint").textContent = hint;
   $("trayActions").innerHTML = action;
   keepDraft(() => { $("tray").className = "sd-tray"; $("tray").innerHTML = body; });
 }
-/* The reveal runs off the clock: redraw only when a new trait or countdown second is due. */
+/* The reveal runs off the clock: redraw when a trait or a countdown second is due; between those only the "next in" number moves. */
 setInterval(() => {
   const g = L && L.game;
   if (!g || g.type !== "sd" || g.phase !== "reveal" || $("viewGame").hidden) return;
-  const n = sdVisible(g), c = sdNow() < g.startAt ? Math.ceil((g.startAt - sdNow()) / 1000) : 0;
-  if (n + ":" + c !== sdFrame) render();
+  if (sdVisible(g) + ":" + sdCount(g) !== sdFrame) return render();
+  const b = $("blackCard").querySelector(".sd-next b"), s = String(sdNextIn(g));
+  if (b && b.textContent !== s) b.textContent = s;
 }, 200);
 document.addEventListener("click", e => {
   const b = e.target.closest("[data-sd-rate]");
