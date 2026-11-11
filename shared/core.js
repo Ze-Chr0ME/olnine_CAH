@@ -17,8 +17,29 @@ const SETTINGS = [
   { key: "judgeTime", icon: "gavel", label: "Time for the czar", min: 10, max: 180, step: 5, cap: 3600, unit: "s", none: "∞", fmt: n => n ? `${n} seconds` : "No timer" },
   { key: "hand", icon: "cards", label: "Cards in hand", min: 3, max: 12, step: 1, cap: 30, fmt: n => `${n} cards` },
   { key: "next", icon: "skip", label: "Next round starts", min: 3, max: 30, step: 1, cap: 300, unit: "s", none: "Host", fmt: n => n ? `After ${n} seconds` : "When the host clicks" },
-  { key: "maxPlayers", icon: "users", label: "Max players", min: 3, max: 10, step: 1, cap: 20, fmt: n => `${n} players` }
+  { key: "maxPlayers", icon: "users", label: "Max players", min: 3, max: 10, step: 1, cap: 20, fmt: n => `${n} players` },
+  { key: "mpTime", icon: "hourglass", label: "Time to wish and twist", min: 10, max: 180, step: 1, cap: 3600, unit: "s", none: "∞", fmt: n => n ? `${n} seconds` : "No timer" },
+  { key: "sdCount", icon: "list", label: "Traits per date", min: 3, max: 15, step: 1, cap: 30, fmt: n => `${n} traits` },
+  { key: "sdEvery", icon: "eye", label: "Seconds per reveal", min: 2, max: 15, step: 1, cap: 60, unit: "s", fmt: n => `${n} seconds` },
+  { key: "sdWrite", icon: "pencil", label: "Time to write traits", min: 10, max: 120, step: 1, cap: 600, unit: "s", fmt: n => `${n} seconds` }
 ];
+/* What the menu shows for each game: icon, one-line pitch, what its lobby language picks, the start line. */
+const GAME_UI = {
+  cah: { icon: "cards", pitch: "Fill in the blank. The czar picks the worst.", deck: "Cards", go: "Let the bad answers begin." },
+  mp: { icon: "paw", pitch: "Make a wish. Everyone ruins it.", deck: "Wishes", go: "Careful what you wish for." },
+  sd: { icon: "heart", pitch: "Keep talking. Your date keeps getting worse.", deck: "Traits", go: "Your date is on the way." }
+};
+const GAME_ORDER = ["cah", "mp", "sd"];
+let homeGame = "cah";
+/* Radio tiles for picking a game; `name` keeps the home menu and the lobby picker apart. */
+function gameTiles(name, chosen, off) {
+  return GAME_ORDER.filter(id => GAMES[id]).map(id => {
+    const g = GAMES[id], u = GAME_UI[id];
+    return `<label class="game-tile g-${id}"><input type="radio" name="${name}" value="${id}" ${name === "set-game" ? `data-setting="game"` : `data-home-game`} ${chosen === id ? "checked" : ""} ${off ? "disabled" : ""}>
+      <span class="gt-ic">${ICONS[u.icon]}</span><span class="gt-name">${esc(g.name)}</span><span class="gt-pitch">${u.pitch}</span>
+      <span class="gt-min">${ICONS.users}${g.min}+</span></label>`;
+  }).join("");
+}
 const showSetting = (o, n) => n ? `${n}${o.unit || ""}` : o.none;
 // Slider position for a value: "none" sits one step past max, typed values past the range pin to the end
 const slideAt = (o, n) => n ? Math.min(o.max, Math.max(o.min, n)) : o.max + o.step;
@@ -398,7 +419,7 @@ async function createLobby() {
       if (!(await db.doc("lobbies/" + c).get()).exists) break;
     }
     const now = Date.now();
-    await db.doc("lobbies/" + c).set({ code: c, host: ME, hostName: myName, status: "lobby", rev: 1, count: 1, created: now, updated: now, settings: settings(null), game: null });
+    await db.doc("lobbies/" + c).set({ code: c, host: ME, hostName: myName, status: "lobby", rev: 1, count: 1, created: now, updated: now, settings: { ...settings(null), game: GAMES[homeGame] ? homeGame : "cah" }, game: null });
     await enterLobby(c);
     pruneOldLobbies();
   } catch (e) { writeError(e); }
@@ -553,7 +574,7 @@ async function commit() {
 }
 async function syncDirectory(c, body) {
   const s = settings(body.settings);
-  const sum = { hostName: body.hostName || "", count: body.count || 0, max: s.maxPlayers, private: !!s.private, status: body.status, round: body.game ? body.game.round : 0 };
+  const sum = { hostName: body.hostName || "", count: body.count || 0, max: s.maxPlayers, private: !!s.private, status: body.status, round: body.game ? body.game.round : 0, game: s.game };
   const key = c + JSON.stringify(sum);
   if (key === lastDir && Date.now() - lastDirAt < 600000) return;
   lastDir = key; lastDirAt = Date.now();
@@ -727,6 +748,10 @@ const ICONS = {
   hourglass: ic(`<path d="M3.5 1.5h9M3.5 14.5h9M4.5 1.5v2.2a3 3 0 0 0 1.2 2.4L8 8l2.3-1.9a3 3 0 0 0 1.2-2.4V1.5M4.5 14.5v-2.2a3 3 0 0 1 1.2-2.4L8 8l2.3 1.9a3 3 0 0 1 1.2 2.4v2.2"/>`),
   gavel: ic(`<rect x="5.5" y="1.6" width="4" height="8" rx="1" transform="rotate(45 7.5 5.6)"/><path d="m9.2 7.3 4.8 4.8M2 14.5h6"/>`),
   lock: ic(`<rect x="3" y="7" width="10" height="7.5" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>`),
+  paw: ic(`<path d="M5 11c0-1.9 1.4-3.3 3-3.3s3 1.4 3 3.3c0 1.4-.9 2.4-1.9 2.4-.6 0-.7-.4-1.1-.4s-.5.4-1.1.4C5.9 13.4 5 12.4 5 11Z"/><circle cx="3.3" cy="7.6" r="1.3"/><circle cx="6" cy="4.4" r="1.3"/><circle cx="10" cy="4.4" r="1.3"/><circle cx="12.7" cy="7.6" r="1.3"/>`),
+  heart: ic(`<path d="M8 13.5S2 10.2 2 6.1A2.9 2.9 0 0 1 8 4.6a2.9 2.9 0 0 1 6 1.5c0 4.1-6 7.4-6 7.4Z"/>`),
+  list: ic(`<path d="M6 4h8M6 8h8M6 12h8"/><circle cx="2.8" cy="4" r=".6" fill="currentColor"/><circle cx="2.8" cy="8" r=".6" fill="currentColor"/><circle cx="2.8" cy="12" r=".6" fill="currentColor"/>`),
+  eye: ic(`<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="2"/>`),
   sliders: ic(`<path d="M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7"/><circle cx="10.5" cy="4.5" r="1.5"/><circle cx="5.5" cy="11.5" r="1.5"/>`),
   chev: `<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 };
@@ -910,6 +935,7 @@ function loadPicture(file) {
 
 function renderHome() {
   renderStandings();
+  if (!$("gameMenu").querySelector(`input[value="${homeGame}"]:checked`)) $("gameMenu").innerHTML = gameTiles("home-game", homeGame, false);
   const off = !db || !canWrite;
   $("createBtn").disabled = $("joinBtn").disabled = off;
   const now = Date.now(), here = occupied();
@@ -926,7 +952,7 @@ function renderHome() {
       const state = waiting ? ["waiting", "Waiting for players"] : d.status === "over" ? ["over", "Game over"] : ["playing", `Round ${d.round || 1} in play`];
       const pips = Array.from({ length: max }, (_, i) => `<i class="${i < d.count ? "on" : ""}"></i>`).join("");
       return `<li class="row lobby-row">
-        <span class="code-tag">${d.id}</span>
+        <span class="code-tag">${d.id}</span><span class="dir-game" data-tip="${esc((GAMES[d.game] || GAMES.cah).name)}">${ICONS[(GAME_UI[d.game] || GAME_UI.cah).icon]}</span>
         <span class="row-main"><span class="row-title">@${esc(d.hostName || "host")}'s lobby</span>
           <span class="row-sub"><span class="state ${state[0]}">${state[1]}</span>
             <span class="seats" role="img" aria-label="${d.count} of ${max} players">${pips}<b>${d.count}/${max}</b></span></span></span>
@@ -989,15 +1015,28 @@ function renderLobby() {
       ${open ? `${k.hint ? `<p class="hint">${k.hint}</p>` : ""}<div class="pchips">${list.map(p => `<label class="pchip" title="${packBy(p)} · ${p.black.length} black · ${p.white.length} white">
         <input type="checkbox" id="pk-${esc(p.id)}" data-pack="${esc(p.id)}" ${chosen.has(p.id) ? "checked" : ""} ${off}><span>${esc(p.name)}</span></label>`).join("")}</div>` : ""}</li>`;
   }).join("");
-  const fields = keys => SETTINGS.filter(o => keys.includes(o.key)).map(o => {
+  const fields = keys => keys.map(k => SETTINGS.find(o => o.key === k)).map(o => {
     const n = s[o.key], top = o.none ? o.max + o.step : o.max, at = slideAt(o, n);
     return `<div class="slide"><span class="slide-ic" data-tip="${o.label}">${ICONS[o.icon]}</span>
       <input type="range" id="set-${o.key}" data-setting="${o.key}" min="${o.min}" max="${top}" step="${o.step}" value="${at}" style="--p:${(at - o.min) / (top - o.min) * 100}%"
         aria-label="${o.label}" aria-valuetext="${o.fmt(n)}" ${off}>
       <span ${host ? `data-tip="Type any value up to ${o.cap}"` : ""}><input class="num" type="text" inputmode="numeric" maxlength="5" data-num="${o.key}" value="${showSetting(o, n)}" aria-label="${o.label}" ${off}></span></div>`;
   }).join("");
-  const flags = Object.keys(LANGS).map(l => `<label class="flag" data-tip="${LANGS[l]}"><input type="radio" name="set-lang" data-setting="lang" value="${l}" aria-label="Cards in ${LANGS[l]}" ${s.lang === l ? "checked" : ""} ${off}>${FLAGS[l]}</label>`).join("");
-  if (!sliding && !(document.activeElement && document.activeElement.dataset.num)) $("lobbySettings").innerHTML = `
+  const gid = GAMES[s.game] ? s.game : "cah", ui = GAME_UI[gid];
+  const flags = Object.keys(LANGS).map(l => `<label class="flag" data-tip="${LANGS[l]}"><input type="radio" name="set-lang" data-setting="lang" value="${l}" aria-label="${ui.deck} in ${LANGS[l]}" ${s.lang === l ? "checked" : ""} ${off}>${FLAGS[l]}</label>`).join("");
+  const lang = `<div class="flags" role="radiogroup" aria-label="${ui.deck} language">${flags}</div>`;
+  const rules = keys => `<fieldset class="setting-section"><legend>${ICONS.scroll}House rules</legend><div class="settings-grid">${fields(keys)}</div>
+      <label class="slide toggle ${host ? "" : "disabled"}"><span class="slide-ic" data-tip="Only friends with the code can find you">${ICONS.lock}</span>
+        <span class="row-title">Private table</span><input type="checkbox" id="set-private" data-setting="private" ${s.private ? "checked" : ""} ${off}></label></fieldset>`;
+  const body = gid === "mp" ? `${rules(["target", "maxPlayers"])}
+    <fieldset class="setting-section"><legend>${ICONS.clock}Timers</legend><div class="settings-grid">${fields(["mpTime", "next"])}</div></fieldset>
+    <fieldset class="setting-section"><legend>${ICONS.paw}Wish deck</legend>${lang}<p class="hint">The wisher can draw one of three wishes or type their own.</p></fieldset>`
+    : gid === "sd" ? `${rules(["target", "maxPlayers"])}
+    <fieldset class="setting-section"><legend>${ICONS.heart}The date</legend><div class="settings-grid">${fields(["sdCount", "sdEvery", "sdWrite", "next"])}</div>
+      ${lang}<p class="hint">Listeners secretly add one trait each, up to half the date. The rest is drawn at random. The best speaker of each lap scores.</p></fieldset>`
+    : "";
+  const picker = `<div class="game-tiles compact" role="radiogroup" aria-label="Game">${gameTiles("set-game", gid, !host)}</div>`;
+  if (!sliding && !(document.activeElement && document.activeElement.dataset.num)) $("lobbySettings").innerHTML = picker + (body || `
     <fieldset class="setting-section"><legend>${ICONS.scroll}House rules</legend><div class="settings-grid">${fields(["target", "rounds", "hand", "maxPlayers"])}</div>
       <label class="slide toggle ${host ? "" : "disabled"}"><span class="slide-ic" data-tip="Only friends with the code can find you">${ICONS.lock}</span>
         <span class="row-title">Private table</span><input type="checkbox" id="set-private" data-setting="private" ${s.private ? "checked" : ""} ${off}></label></fieldset>
@@ -1006,13 +1045,12 @@ function renderLobby() {
       ${s.lang && s.lang !== "en" ? `<p class="hint">Built-in packs use ${LANGS[s.lang]}; untranslated and player-made cards stay in English.</p>` : ""}
       <div class="pack-picker"><div class="pack-sum"><span class="row-title">Card packs</span>
         <span class="hint">${plural(onCount, "pack", "packs")} &middot; ${counts.black.toLocaleString()} black &middot; ${counts.white.toLocaleString()} white</span></div>
-        <ul class="pgs">${packRows}</ul></div></fieldset>
-    ${host ? "" : `<p class="hint">Only the host can change these settings.</p>`}`;
+        <ul class="pgs">${packRows}</ul></div></fieldset>`) + (host ? "" : `<p class="hint">Only the host can change these settings.</p>`);
 
   if (host) {
     const chk = startCheck(), missing = Math.max(0, curGame().min - ids.filter(present).length);
     $("lobbyStart").innerHTML = `<button class="btn primary big" type="button" data-act="start" ${chk.ok ? "" : "disabled"}>${ICONS.play}Start game</button>
-      <span class="hint">${chk.ok ? `${plural(ids.filter(present).length, "player", "players")} ready. Let the bad answers begin.` : missing ? `Need ${plural(missing, "more player", "more players")} to start. Share the lobby code.` : esc(chk.why)}</span>`;
+      <span class="hint">${chk.ok ? `${plural(ids.filter(present).length, "player", "players")} ready. ${ui.go}` : missing ? `Need ${plural(missing, "more player", "more players")} to start. Share the lobby code.` : esc(chk.why)}</span>`;
   } else {
     $("lobbyStart").innerHTML = `<span class="hint">Waiting for ${at(L.host)} to start the game.</span>
       ${!room ? `<button class="btn small" type="button" data-act="take-over">${ICONS.crown}Host not responding? Take over</button>` : ""}`;
@@ -1145,10 +1183,11 @@ document.addEventListener("click", e => {
   else if (act === "skip" && isHost() && piled(L.game)) { skipRound(L.game, "The host skipped this round."); commit(); }
   else if (act === "end" || act === "again") backToLobby();
 });
+document.addEventListener("change", e => { if (e.target.dataset.homeGame !== undefined) homeGame = e.target.value; });
 document.addEventListener("change", e => {
   if (!isHost() || L.status !== "lobby") return;
   const key = e.target.dataset.setting;
-  if (key) { L.settings = { ...settings(), [key]: key === "private" ? e.target.checked : key === "lang" ? e.target.value : slideValue(e.target) }; sliding = false; commit(); }
+  if (key) { L.settings = { ...settings(), [key]: key === "private" ? e.target.checked : key === "lang" || key === "game" ? e.target.value : slideValue(e.target) }; sliding = false; commit(); }
   else if (e.target.dataset.num) {
     const o = SETTINGS.find(o => o.key === e.target.dataset.num), n = parseInt(e.target.value, 10);
     const v = n > 0 ? Math.min(o.cap, Math.max(o.min, n)) : o.none ? 0 : settings()[o.key];

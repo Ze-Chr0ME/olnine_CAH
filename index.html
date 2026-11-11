@@ -49,8 +49,9 @@
     <section class="home-hero" aria-labelledby="homeTitle">
       <div class="hero-copy">
         <h2 id="homeTitle">Party<br>Games<span>.</span></h2>
-        <p class="hero-tagline">A galactic party game for horrible people. 3 to 20 players.</p>
+        <p class="hero-tagline">Three galactic party games for horrible people. 2 to 20 players.</p>
         <form id="startForm" class="play" autocomplete="off">
+          <div id="gameMenu" class="game-tiles" role="radiogroup" aria-label="Game"></div>
           <div class="field">
             <label for="nameInput">Your name</label>
             <input id="nameInput" maxlength="20" spellcheck="false" placeholder="e.g. warlord_wendy">
@@ -229,4 +230,8 @@
 <script src="cah/packs.js"></script>
 <script src="shared/core.js"></script>
 <script src="cah/cah.js"></script>
+<script src="monkey-paw/wishes.js"></script>
+<script src="monkey-paw/mp.js"></script>
+<script src="speed-date/traits.js"></script>
+<script src="speed-date/sd.js"></script>
 <script>boot();</script>
