@@ -234,7 +234,7 @@ function sdRender(g) {
     won: pid => phase === "over" ? (g.champions || []).includes(pid) : phase === "result" && g.cycleWinners.includes(pid),
     chip: pid => pid === sp && phase !== "over" ? `<span class="chip czar">on a date</span>`
       : phase === "write" ? (wrote(pid) ? `<span class="chip done">wrote</span>` : `<span class="chip">${pid === ME ? "your move" : `writing<span class="dots"></span>`}</span>`)
-      : phase === "rate" ? (rated(pid) ? `<span class="chip done">rated</span>` : `<span class="chip">judging<span class="dots"></span></span>`) : "",
+      : phase === "rate" ? (rated(pid) ? `<span class="chip done">rated</span>` : `<span class="chip">rating<span class="dots"></span></span>`) : "",
     empty: "No laps finished yet. The best talkers land here."
   });
 

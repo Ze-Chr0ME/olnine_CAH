@@ -134,7 +134,7 @@ function mpTick(g) {
 }
 /* ---------- Monkey Paw table ---------- */
 /* The table reads like a cursed contract: the wish on a parchment slip, the winning twist sealed in red wax under it. */
-let mpChoice = null, mpLastKey = "", mpHeld = null, mpWishPick = null;
+let mpChoice = null, mpLastKey = "", mpHeld = null, mpWishPick = null, mpWishOpen = false;
 const mpGranted = t => String(t || "").replace(/^\s*granted\s*,?\s*(but\s*,?)?\s*/i, "");
 const mpLong = t => String(t || "").length > 110 ? "long" : "";
 const mpRoman = n => [[10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]].reduce((s, [v, r]) => { while (n >= v) { s += r; n -= v; } return s; }, "");
@@ -179,7 +179,7 @@ function mpCrown(g) {
 function mpRender(g) {
   const phase = g.phase, w = g.wisher, iWish = w === ME, role = mpRole(), host = isHost(), cfg = settings();
   const key = g.gid + ":" + g.round + ":" + phase, fresh = key !== mpLastKey;
-  if (fresh) { mpLastKey = key; mpChoice = null; mpWishPick = null; }
+  if (fresh) { mpLastKey = key; mpChoice = null; mpWishPick = null; mpWishOpen = false; }
   if (mpChoice != null && !(g.order[mpChoice] && present(g.order[mpChoice].pid))) mpChoice = null;
   const mine = mpMine(), wished = !!mpSeatText(g, ME, "wish");
   const twisted = pid => phase === "twist" ? !!mpSeatText(g, pid, "twist") : g.order.some(a => a.pid === pid);
@@ -198,6 +198,8 @@ function mpRender(g) {
   $("stage").classList.toggle("swap", !!held && mpHeld !== mpChoice);
   mpHeld = held ? mpChoice : null;
   $("blackCard").innerHTML = phase === "over" ? mpCrown(g) : mpSlip(g, shown, held ? "held" : shown ? "granted" : phase);
+  const slip = $("blackCard").querySelector(".mp-slip");
+  if (slip && g.wish && (phase === "twist" || phase === "judge")) { slip.classList.toggle("full", mpWishOpen); slip.dataset.mpFull = ""; slip.title = "Tap to read the whole wish"; }
 
   let status;
   if (role === "spectator" && !["result", "over"].includes(phase)) status = `<b class="cue">Watching.</b> You're in from the next wish.`;
@@ -226,7 +228,7 @@ function mpRender(g) {
   let title = "", hint = "", body = "", action = "", idle = false;
   if (phase === "wish") {
     if (iWish && !wished) {
-      title = "Make a wish";
+      title = "Your wish";
       hint = g.wishCards.length ? "Pick one, or write your own." : "";
       body = (g.wishCards.length ? `<div class="mp-opts">${g.wishCards.map((t, i) => `<button type="button" class="mp-opt${mpWishPick === i ? " on" : ""}" style="--i:${i}" data-mp-wish="${i}" aria-pressed="${mpWishPick === i}" title="Choose this wish">
         <span class="mp-n">${mpRoman(i + 1)}</span><p class="${mpLong(t)}">${esc(t)}</p></button>`).join("")}</div>` : "")
@@ -235,7 +237,7 @@ function mpRender(g) {
     } else idle = true;
   } else if (phase === "twist") {
     if (role === "twister" && !mine) {
-      title = "Twist it";
+      title = "Your curse";
       body = composer("mpForm", key, "Granted, but", "every calorie goes straight to your face.", 200);
       action = `<button class="btn primary" type="submit" form="mpForm">${ICONS.send}Seal it</button>`;
     } else if (mine) {
@@ -268,6 +270,7 @@ function mpRender(g) {
 document.addEventListener("click", e => {
   const g = L && L.game;
   if (!g || g.type !== "mp") return;
+  if (e.target.closest("[data-mp-full]")) { mpWishOpen = !mpWishOpen; render(); return; }
   const b = e.target.closest("[data-mp-wish], [data-mp-sub], [data-act='mp-pick']");
   if (!b || b.disabled) return;
   if (b.dataset.mpWish != null) { const i = +b.dataset.mpWish; mpWishPick = mpWishPick === i ? null : i; render(); }
@@ -287,7 +290,7 @@ GAMES.mp = { id: "mp", name: "Monkey Paw", min: 3, ownsMin: true, defaults: { mp
   next: g => mpStartRound(g), skip: g => mpSkipRound(g, "The host skipped this round.") };
 /* Typing your own wish lets go of a picked deck wish */
 document.addEventListener("input", e => {
-  if (mpWishPick == null || !e.target.closest || !e.target.closest("#mpForm")) return;
+  if (!e.isTrusted || mpWishPick == null || !e.target.closest || !e.target.closest("#mpForm")) return;   // a redraw restoring the draft is not typing
   mpWishPick = null;
   document.querySelectorAll(".mp-opt.on").forEach(b => { b.classList.remove("on"); b.setAttribute("aria-pressed", "false"); });
 });
