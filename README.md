@@ -52,7 +52,9 @@ One-time setup:
 
 The config values are public identifiers, not secrets; the rules files decide what browsers may do. On claude.ai the page keeps using the artifact's own storage, and the Firebase code is never loaded.
 
-Free-plan limits (per day: 50,000 Firestore reads, 20,000 writes; 100 simultaneous Realtime Database connections) cover many games a day. Progress on GitHub Pages is per browser, because sign-in is anonymous.
+Free-plan limits (per day: 50,000 Firestore reads, 20,000 writes; 100 simultaneous Realtime Database connections) cover many games a day. Progress starts with a profile for each browser. To share a profile across devices, open your ruler menu > **Connect devices**, choose **Get my code**, and enter that personal code in the profile editor on another device. Names, portraits, XP and stats then sync automatically. Codes have 24 letters/numbers, grouped for copying, and grant full access to the profile; keep them private. Connecting selects the existing profile and does not merge it with progress on the receiving device. Leave a lobby before switching profiles.
+
+Publish the current `firestore.rules` before using personal codes (Firebase Console > Firestore > Rules, or after signing in with `npx firebase-tools login`, run `npx firebase-tools deploy --only firestore:rules --project cardsagainsthumanity-9090e`). The anonymous Firebase identity remains per browser; a private `accountLinks/<device uid>` record selects the shared profile. `accountKeys/<random code>` can only be retrieved by exact code, never listed, and codes are never stored in public standings. The first code uses the existing profile so its progress is preserved. Shared-profile rewards are applied in Firestore transactions to preserve progress when devices save at the same time.
 
 ## Rules
 

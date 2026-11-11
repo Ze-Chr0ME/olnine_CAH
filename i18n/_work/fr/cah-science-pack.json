@@ -1,0 +1,37 @@
+{
+  "id": "cah-science-pack",
+  "black": [
+    "Une étude publiée dans Nature cette semaine révèle que ____ est bon pour la santé à petite dose.",
+    "Salut, les jeunes scientifiques ! Blouses et lunettes de protection : aujourd'hui, on étudie ____ !",
+    "Pour recréer les conditions juste après le Big Bang, les physiciens du LHC observent des collisions entre ____ et ____.",
+    "Comme prévu, nous observons une forte corrélation entre ____ et ____ (p < 0,05).",
+    "Une avancée majeure : des scientifiques ont synthétisé ____ en laboratoire.",
+    "Aujourd'hui dans MythBusters, nous avons mesuré combien de temps ____ résiste à ____.",
+    "Qu'est-ce qui a vraiment tué les dinosaures ?"
+  ],
+  "white": [
+    "3,7 milliards d'années d'évolution.",
+    "Un rapport taille-hanches de 0,7.",
+    "Un trou noir supermassif.",
+    "Le succès reproductif.",
+    "Une expertise dans un domaine restreint que personne ne comprend et dont tout le monde se fout.",
+    "David Attenborough qui nous regarde nous accoupler.",
+    "L'apparition des caractères sexuels secondaires.",
+    "Une virée dans une tornade pour étudier les tornades.",
+    "L'électroéjaculation d'un singe capucin.",
+    "L'évolution vers un vagin labyrinthique.",
+    "Une décompression explosive.",
+    "Un échec au test de Turing.",
+    "Des anecdotes amusantes et intéressantes sur les cailloux.",
+    "Une vive inquiétude pour le réchauffement climatique pendant quelques secondes.",
+    "L'infini.",
+    "Un manque de sérotonine.",
+    "La libération d'ocytocine par stimulation manuelle des tétons.",
+    "La photosynthèse.",
+    "La réconciliation de la théorie quantique et de la relativité générale.",
+    "Une lente évaporation.",
+    "La majesté tranquille de la tortue marine.",
+    "Le Soleil qui engloutit la Terre.",
+    "Les légendes urbaines"
+  ]
+}

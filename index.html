@@ -672,6 +672,10 @@ button.card:disabled { cursor: default; opacity: .55; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+.account-panel { grid-column: 1 / -1; }
+.account-panel .inline { flex-wrap: wrap; align-items: end; }
+.account-panel .field { flex: 1 1 240px; min-width: 0; }
+.account-code { font-family: var(--mono, monospace); letter-spacing: .06em; width: 100%; box-sizing: border-box; }
 </style>
 
 <div class="app">
@@ -768,6 +772,20 @@ button.card:disabled { cursor: default; opacity: .55; }
         <button class="btn primary" type="button" data-act="pf-save"><i data-ic="check"></i>Save ruler</button>
         <button class="btn" type="button" data-act="pf-cancel">Cancel</button>
       </div>
+    </section>
+    <section id="accountPanel" class="panel account-panel" aria-labelledby="accountTitle" hidden>
+      <h2 id="accountTitle" class="ptitle">One ruler, all your devices</h2>
+      <p class="hint">Use your personal code on another device to share your name, portrait, XP and victories. No password needed. Keep it private: anyone with it can use your profile.</p>
+      <div class="inline">
+        <div class="field"><label for="personalCode">Your personal code</label><input id="personalCode" class="account-code" readonly placeholder="Get your code below" aria-describedby="accountMsg"></div>
+        <button id="accountCopy" class="btn" type="button" data-act="account-copy">Get my code</button>
+      </div>
+      <form id="accountForm" class="inline" autocomplete="off">
+        <div class="field"><label for="accountInput">Connect to an existing profile</label><input id="accountInput" class="account-code" maxlength="29" spellcheck="false" autocapitalize="characters" autocomplete="off" placeholder="XXXXXX-XXXXXX-XXXXXX-XXXXXX"></div>
+        <button id="accountConnect" class="btn primary" type="submit">Connect profile</button>
+      </form>
+      <p class="hint">Connecting replaces the profile shown on this device; it does not merge two profiles. Leave your lobby before switching.</p>
+      <p id="accountMsg" class="hint" role="status"></p>
     </section>
   </div>
 
@@ -1132,7 +1150,7 @@ function cleanProfile(d, seed) {
   for (const k of STAT_KEYS) stats[k] = Math.max(0, Math.floor(+((d.stats || {})[k]) || 0));
   return {
     name: cleanName(d.name) || "", face: cleanFace(d.face, seed), img: validImg(d.img),
-    xp: Math.max(0, Math.floor(+d.xp || 0)), stats, awarded: Array.isArray(d.awarded) ? d.awarded.filter(x => typeof x === "string").slice(-40) : []
+    xp: Math.max(0, Math.floor(+d.xp || 0)), stats, awarded: Array.isArray(d.awarded) ? d.awarded.filter(x => typeof x === "string").slice(-200) : []
   };
 }
 let profile = (() => { try { return cleanProfile(JSON.parse(store.get("cah-profile", "null")), ME); } catch { return cleanProfile(null, ME); } })();
@@ -1152,19 +1170,61 @@ function fetchPeople(uids) {
     db.doc("profiles/" + u).get().then(s => { if (s.exists) { people[u] = s.data(); render(); } }).catch(() => {});
   }
 }
-let saving = false, saveAgain = false;
-async function saveProfile() {
+let saving = false, saveAgain = false, saveTask = null;
+let firebaseAccountUser = null, personalCode = "", accountBusy = false, unsubProfile = null;
+let pendingRewards = [], syncedLook = null;
+const profileLook = p => ({ name: p.name, face: clone(p.face), img: p.img });
+const rewardStoreKey = () => "cah-rewards:" + uid + ":" + ME;
+function cacheRewards() { store.set(rewardStoreKey(), JSON.stringify(pendingRewards)); }
+function applyRewards(data, rewards) {
+  const d = cleanProfile(data, ME);
+  for (const r of rewards) {
+    if (d.awarded.includes(r.id)) continue;
+    d.xp += r.xp;
+    for (const k of STAT_KEYS) d.stats[k] += r.stats[k] || 0;
+    d.awarded = uniq(d.awarded.concat(r.marks, r.id)).slice(-200);
+  }
+  return d;
+}
+function saveProfile() {
   store.set("cah-profile", JSON.stringify(profile));
-  if (!db || !uid || !canWrite) return;
-  if (saving) { saveAgain = true; return; }
+  if (!db || !uid || !canWrite) return Promise.resolve(false);
+  if (saving) { saveAgain = true; return saveTask; }
   saving = true;
-  try {
-    do {
-      saveAgain = false;
-      await db.doc("profiles/" + uid).set({ ...clone(profile), updated: Date.now() });
-    } while (saveAgain);
-  } catch (e) { dbErr(e); }
-  finally { saving = false; }
+  saveTask = (async () => {
+    try {
+      do {
+        saveAgain = false;
+        const target = uid, local = clone(profile), rewards = clone(pendingRewards);
+        const ref = db.doc("profiles/" + target);
+        const edits = Object.fromEntries(Object.entries(profileLook(local)).filter(([k, v]) => !syncedLook || JSON.stringify(v) !== JSON.stringify(syncedLook[k])));
+        if (firebaseAccountUser) {
+          const saved = await db.runTransaction(async tx => {
+            const snap = await tx.get(ref);
+            const next = snap.exists ? applyRewards(snap.data(), rewards) : {
+              ...local, awarded: uniq(local.awarded.concat(rewards.map(r => r.id))).slice(-200)
+            };
+            Object.assign(next, edits);
+            tx.set(ref, { ...next, updated: Date.now() });
+            return next;
+          });
+          if (target !== uid) return false;
+          const ids = new Set(rewards.map(r => r.id));
+          pendingRewards = pendingRewards.filter(r => !ids.has(r.id)); cacheRewards();
+          const current = profile;
+          syncedLook = profileLook(saved);
+          profile = applyRewards(saved, pendingRewards);
+          if (saveAgain) Object.assign(profile, { name: current.name, face: current.face, img: current.img });
+          myName = profile.name; store.set("cah-name", myName);
+          store.set("cah-profile", JSON.stringify(profile));
+          syncSeat();
+        } else await ref.set({ ...local, updated: Date.now() });
+      } while (saveAgain);
+      return true;
+    } catch (e) { dbErr(e); return false; }
+    finally { saving = false; saveAgain = false; render(); }
+  })();
+  return saveTask;
 }
 /* Keeps your seat in the lobby showing your current name, portrait and level. */
 function syncSeat() {
@@ -1173,12 +1233,15 @@ function syncSeat() {
   if (s.name === myName && JSON.stringify(s.face) === JSON.stringify(profile.face) && s.lvl === lvl && s.uid === uid) return;
   myRef().update({ name: myName, face: profile.face, lvl, uid }).catch(dbErr);
 }
-/* The stored profile wins over this browser's copy, except that XP and stats never go backwards
-   and the round/game keys already credited here are kept. */
+/* Shared profiles are authoritative; unsaved rewards are replayed until the server confirms them.
+   The claude.ai backend retains its original local-progress behavior. */
 function adoptProfile(data) {
-  const d = cleanProfile(data, ME), old = profile, behind = d.xp < old.xp;
+  const old = profile;
+  syncedLook = profileLook(cleanProfile(data, ME));
+  const d = firebaseAccountUser ? applyRewards(data, pendingRewards) : cleanProfile(data, ME);
+  const behind = !firebaseAccountUser && d.xp < old.xp;
   if (behind) { d.xp = old.xp; d.stats = old.stats; }
-  d.awarded = uniq(d.awarded.concat(old.awarded)).slice(-40);
+  if (!firebaseAccountUser) d.awarded = uniq(d.awarded.concat(old.awarded)).slice(-200);
   if (!d.name) d.name = old.name;
   profile = d;
   if (profile.name) { myName = profile.name; store.set("cah-name", myName); if (!code) $("nameInput").value = myName; }
@@ -1192,6 +1255,7 @@ const seatFields = () => ({ name: myName, face: profile.face, lvl: levelOf(profi
 function earn() {
   const g = L && L.game;
   if (!g || !g.seats || !g.seats.includes(ME) || (g.phase !== "result" && g.phase !== "over")) return;
+  const before = clone(profile);
   const gains = [], s = profile.stats, lvl0 = levelOf(profile.xp).lvl;
   const mark = k => { const key = `${ME}:${g.gid}:${k}`; if (profile.awarded.includes(key)) return false; profile.awarded.push(key); return true; };
   if (g.winner && g.order.length && mark(g.round)) {
@@ -1206,8 +1270,14 @@ function earn() {
     if ((g.champions || []).includes(ME)) { s.wins++; gains.push([XP.victory, "Victory"]); }
   }
   if (!gains.length) return;
-  profile.awarded = profile.awarded.slice(-40);
+  profile.awarded = profile.awarded.slice(-200);
   profile.xp += gains.reduce((a, b) => a + b[0], 0);
+  if (firebaseAccountUser) {
+    pendingRewards.push({ id: "reward:" + rid(24), xp: profile.xp - before.xp,
+      stats: Object.fromEntries(STAT_KEYS.map(k => [k, s[k] - before.stats[k]])),
+      marks: profile.awarded.filter(k => !before.awarded.includes(k)) });
+    cacheRewards();
+  }
   for (const [n, why] of gains) toast(`+${n} XP`, why);
   const lvl = levelOf(profile.xp).lvl;
   if (lvl > lvl0) toast("Promoted", `Level ${lvl}: ${rankOf(lvl)}`, "", true);
@@ -1947,7 +2017,8 @@ function renderRuler() {
         .map(([k, v]) => `<div class="stat"><dt>${k}</dt><dd>${v}</dd></div>`).join("")}
     </dl>
     <p class="hint">Play, judge and win to earn XP and climb the ranks.</p>
-    <div class="menu-actions"><button class="btn small primary" type="button" data-act="open-profile">${ICONS.pencil}Edit portrait and name</button></div>`;
+    <div class="menu-actions"><button class="btn small primary" type="button" data-act="open-profile">${ICONS.pencil}Edit portrait and name</button>
+      ${firebaseAccountUser ? `<button class="btn small" type="button" data-act="account-open">${ICONS.login}Connect devices</button>` : ""}</div>`;
 }
 
 function renderStandings() {
@@ -1966,10 +2037,96 @@ function renderStandings() {
     : `<li class="empty">Nobody has earned XP yet. Finish a game to claim the top spot.</li>`;
 }
 
+/* Personal codes are random bearer credentials. They never appear in public profile documents. */
+const ACCOUNT_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const normalizeAccountCode = value => String(value).toUpperCase().replace(/[\s-]/g, "");
+const validAccountCode = value => /^[A-HJ-NP-Z2-9]{24}$/.test(value);
+const formatAccountCode = value => value.match(/.{1,6}/g)?.join("-") || "";
+function newAccountCode() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(24)), n => ACCOUNT_ALPHABET[n & 31]).join("");
+}
+function accountMessage(message) { $("accountMsg").textContent = message; }
+function renderAccount() {
+  $("accountPanel").hidden = !firebaseAccountUser;
+  $("personalCode").value = formatAccountCode(personalCode);
+  $("accountCopy").textContent = personalCode ? "Copy code" : "Get my code";
+  $("accountCopy").disabled = accountBusy || !canWrite;
+  $("accountConnect").disabled = accountBusy || !!code || !canWrite;
+}
+function accountError(e) {
+  accountMessage(e.code === "permission-denied"
+    ? "Account connections are not available on this server yet. Please try again later."
+    : "Couldn't connect. Check your connection and try again.");
+}
+async function bindProfile(id, replace = false) {
+  unsubProfile && unsubProfile(); unsubProfile = null;
+  const previous = uid;
+  const snap = await db.doc("profiles/" + id).get();
+  uid = id;
+  try { pendingRewards = JSON.parse(store.get(rewardStoreKey(), "[]")); if (!Array.isArray(pendingRewards)) pendingRewards = []; } catch { pendingRewards = []; }
+  if (replace || (store.get("cah-profile-account", previous) !== id)) {
+    profile = cleanProfile(null, ME); syncedLook = null; myName = "";
+  }
+  store.set("cah-profile-account", id);
+  if (snap.exists) adoptProfile(snap.data()); else if (canWrite) await saveProfile();
+  if (pendingRewards.length) await saveProfile();
+  unsubProfile = db.doc("profiles/" + id).onSnapshot(s => {
+    if (uid === id && s.exists && !saving && !saveAgain) { adoptProfile(s.data()); render(); }
+  }, dbErr);
+  $("nameInput").value = $("renameInput").value = myName;
+}
+async function copyPersonalCode() {
+  if (!firebaseAccountUser || accountBusy) return;
+  accountBusy = true; renderAccount();
+  try {
+    if (!personalCode) {
+      if (!await saveProfile()) throw new Error("Profile not saved");
+      const candidate = newAccountCode(), linkRef = db.doc("accountLinks/" + firebaseAccountUser);
+      const link = await db.runTransaction(async tx => {
+        const existing = await tx.get(linkRef);
+        if (existing.exists) return existing.data();
+        const keyRef = db.doc("accountKeys/" + candidate), key = await tx.get(keyRef);
+        if (key.exists) throw new Error("Code collision; try again");
+        const data = { accountId: firebaseAccountUser, code: candidate };
+        tx.set(keyRef, { accountId: firebaseAccountUser }); tx.set(linkRef, data);
+        return data;
+      });
+      if (link.accountId !== uid) { accountMessage("Your account changed in another tab. Reload before continuing."); return; }
+      personalCode = link.code;
+    }
+    renderAccount();
+    try { await navigator.clipboard.writeText(formatAccountCode(personalCode)); accountMessage("Copied. Enter this code in your profile on another device."); }
+    catch { $("personalCode").focus(); $("personalCode").select(); accountMessage("Your code is ready. Select and copy it to use on another device."); }
+  } catch (e) { accountError(e); }
+  finally { accountBusy = false; renderAccount(); }
+}
+async function connectAccount(e) {
+  e.preventDefault();
+  if (!firebaseAccountUser || accountBusy) return;
+  if (code) { accountMessage("Leave your lobby before switching profiles."); return; }
+  const key = normalizeAccountCode($("accountInput").value);
+  if (!validAccountCode(key)) { accountMessage("Enter all 24 letters and numbers of your personal code."); return; }
+  accountBusy = true; renderAccount();
+  try {
+    const snap = await db.doc("accountKeys/" + key).get();
+    if (!snap.exists) { accountMessage("That personal code wasn't found. Check it and try again."); return; }
+    const target = snap.data().accountId;
+    if (target === uid) { personalCode = key; accountMessage("This device is already connected to that profile."); return; }
+    if (!await saveProfile()) { accountMessage("Couldn't save this profile. Try again before switching."); return; }
+    await db.doc("accountLinks/" + firebaseAccountUser).set({ accountId: target, code: key });
+    await bindProfile(target, true);
+    personalCode = key; draft = null; $("accountInput").value = "";
+    notice("Connected to @" + (myName || "your ruler") + ". Your profile will stay in sync on this device.");
+    render();
+  } catch (err) { accountError(err); }
+  finally { accountBusy = false; renderAccount(); }
+}
+
 /* Portrait editor: `draft` holds the unsaved face, picture and name while the editor is open. */
 let draft = null;
 function openProfile() { draft = { face: { ...profile.face }, img: profile.img, name: myName }; $("pfName").value = myName; $("pfMsg").hidden = true; render(); }
 function renderProfile() {
+  renderAccount();
   const lvl = levelOf(profile.xp).lvl;
   $("pfBig").innerHTML = avHTML({ face: draft.face, img: draft.img, lvl }, "xxl");
   $("pfRank").textContent = `${rankOf(lvl)} · Level ${lvl}`;
@@ -2401,6 +2558,8 @@ document.addEventListener("click", e => {
   const act = a.dataset.act;
   if (act === "toggle-menu") setMenu(menuOpen === "ruler" ? null : "ruler");
   else if (act === "toggle-theme") setMenu(menuOpen === "theme" ? null : "theme");
+  else if (act === "account-open") { setMenu(null); openProfile(); $("accountPanel").scrollIntoView({ behavior: "smooth", block: "center" }); }
+  else if (act === "account-copy") copyPersonalCode();
   else if (act === "open-profile") { setMenu(null); openProfile(); }
   else if (act === "pf-save" && draft) saveRuler();
   else if (act === "pf-cancel") { draft = null; render(); }
@@ -2459,6 +2618,7 @@ document.addEventListener("pointerdown", e => { if (e.target.type === "range") s
 document.addEventListener("pointerup", () => setTimeout(() => { sliding = false; }));
 $("startForm").addEventListener("submit", e => { e.preventDefault(); createLobby(); });
 $("codeInput").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); joinLobby($("codeInput").value); } });
+$("accountForm").addEventListener("submit", connectAccount);
 $("packForm").addEventListener("submit", savePack);
 $("renameForm").addEventListener("submit", rename);
 $("pfFile").addEventListener("change", e => { loadPicture(e.target.files[0]); e.target.value = ""; });
@@ -2488,6 +2648,7 @@ async function firebaseBackend() {
   for (const m of ["app", "auth", "firestore", "database"]) await loadScript(`${FB_SDK}firebase-${m}-compat.js`);
   firebase.initializeApp(FIREBASE);
   const { user: who } = await firebase.auth().signInAnonymously();
+  firebaseAccountUser = who.uid;
   const rtdb = firebase.database(), mine = rtdb.ref("presence/" + rid(12));
   let peers = [], connected = false, last = null;
   const peerFns = [], connFns = [];
@@ -2541,15 +2702,18 @@ async function boot() {
     room.onPeers(() => { trackPresence(); if (code && L && L.game && L.game.phase === "judge") render(); }, () => { room = null; });
     setPresence({ look: null });
   }
-  /* Your ruler lives at profiles/<your id>: everyone reads the standings, each person writes only their own. */
+  /* Anonymous device identity stays separate from the shared ruler identity. */
   uid = u ? await u.id().catch(() => null) : null;
   if (uid && !/^[\w-]{1,128}$/.test(uid)) uid = null;
   if (uid) {
-    try {
-      const s = await db.doc("profiles/" + uid).get();
-      if (s.exists) adoptProfile(s.data()); else if (canWrite) saveProfile();
-    } catch {}
-    db.doc("profiles/" + uid).onSnapshot(s => { if (s.exists && !saving && !saveAgain) { adoptProfile(s.data()); render(); } }, () => {});
+    let accountId = uid;
+    if (firebaseAccountUser) {
+      try {
+        const link = await db.doc("accountLinks/" + firebaseAccountUser).get();
+        if (link.exists) { accountId = link.data().accountId; personalCode = link.data().code; }
+      } catch (e) { if (e.code !== "permission-denied") console.error(e); }
+    }
+    try { await bindProfile(accountId); } catch (e) { dbErr(e); }
   }
   db.collection("profiles").orderBy("xp", "desc").limit(50).onSnapshot(s => {
     standings = s.docs.map(d => ({ id: d.id, ...cleanProfile(d.data(), d.id) }));

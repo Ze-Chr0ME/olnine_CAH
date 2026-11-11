@@ -5,10 +5,36 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
 
-    // Rulers: everyone reads the standings, each browser writes only its own profile.
+    // A device can edit the account it owns or the account selected with a personal code.
+    function linkedTo(uid) {
+      let link = /databases/$(database)/documents/accountLinks/$(request.auth.uid);
+      return exists(link) && get(link).data.accountId == uid;
+    }
+
+    // Codes are 120 random bits, never public profile fields or listable collections.
+    match /accountKeys/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() && code.matches('^[A-HJ-NP-Z2-9]{24}$')
+        && request.resource.data.keys().hasOnly(['accountId'])
+        && request.resource.data.accountId == request.auth.uid;
+      allow update, delete: if false;
+    }
+    match /accountLinks/{device} {
+      allow get: if signedIn() && request.auth.uid == device;
+      allow list: if false;
+      allow create, update: if signedIn() && request.auth.uid == device
+        && request.resource.data.keys().hasOnly(['accountId', 'code'])
+        && request.resource.data.code is string
+        && request.resource.data.code.matches('^[A-HJ-NP-Z2-9]{24}$')
+        && getAfter(/databases/$(database)/documents/accountKeys/$(request.resource.data.code)).data.accountId == request.resource.data.accountId;
+      allow delete: if signedIn() && request.auth.uid == device;
+    }
+
+    // Rulers: everyone reads the standings; access codes remain in private records.
     match /profiles/{uid} {
       allow read: if true;
-      allow write: if signedIn() && request.auth.uid == uid;
+      allow write: if signedIn() && (request.auth.uid == uid || linkedTo(uid));
     }
 
     // Lobbies: the host's browser writes the lobby, each player writes their own seat
