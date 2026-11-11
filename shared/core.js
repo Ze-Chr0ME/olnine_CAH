@@ -7,14 +7,14 @@ const GAMES = {};
 function gameId() { return (L && L.settings && L.settings.game) || "cah"; }
 function curGame() { return GAMES[gameId()] || GAMES.cah; }
 /* Card text languages. Translations of the official packs load from i18n/ the first time a lobby picks one. */
-const LANGS = { en: "English", de: "Deutsch", fr: "FranÃ§ais" };
+const LANGS = { en: "English", de: "Deutsch", fr: "Français" };
 /* Each numeric setting is a slider from min to max in steps of `step`; the box beside it takes any whole number from min up to `cap`.
    Settings with `none` also allow 0 (no limit, no timer, the host clicks): one step past the slider's max, or an empty box. */
 const SETTINGS = [
   { key: "target", icon: "trophy", label: "Points to win", min: 1, max: 20, step: 1, cap: 99, fmt: n => `${n} points` },
-  { key: "rounds", icon: "repeat", label: "Round limit", min: 1, max: 30, step: 1, cap: 999, none: "âˆž", fmt: n => n ? `${n} rounds` : "No limit" },
-  { key: "pickTime", icon: "hourglass", label: "Time to pick cards", min: 10, max: 180, step: 5, cap: 3600, unit: "s", none: "âˆž", fmt: n => n ? `${n} seconds` : "No timer" },
-  { key: "judgeTime", icon: "gavel", label: "Time for the czar", min: 10, max: 180, step: 5, cap: 3600, unit: "s", none: "âˆž", fmt: n => n ? `${n} seconds` : "No timer" },
+  { key: "rounds", icon: "repeat", label: "Round limit", min: 1, max: 30, step: 1, cap: 999, none: "∞", fmt: n => n ? `${n} rounds` : "No limit" },
+  { key: "pickTime", icon: "hourglass", label: "Time to pick cards", min: 10, max: 180, step: 5, cap: 3600, unit: "s", none: "∞", fmt: n => n ? `${n} seconds` : "No timer" },
+  { key: "judgeTime", icon: "gavel", label: "Time for the czar", min: 10, max: 180, step: 5, cap: 3600, unit: "s", none: "∞", fmt: n => n ? `${n} seconds` : "No timer" },
   { key: "hand", icon: "cards", label: "Cards in hand", min: 3, max: 12, step: 1, cap: 30, fmt: n => `${n} cards` },
   { key: "next", icon: "skip", label: "Next round starts", min: 3, max: 30, step: 1, cap: 300, unit: "s", none: "Host", fmt: n => n ? `After ${n} seconds` : "When the host clicks" },
   { key: "maxPlayers", icon: "users", label: "Max players", min: 3, max: 10, step: 1, cap: 20, fmt: n => `${n} players` }
@@ -624,7 +624,7 @@ function renderSync() {
   const offline = room && !room.connected(), behind = !!behindSince;
   b.classList.toggle("spin", resyncing);
   b.dataset.state = offline ? "off" : behind ? "lag" : "ok";
-  const tip = resyncing ? "Resyncingâ€¦" : offline ? "Offline. Tap to reconnect" : behind ? "Behind the table. Tap to resync" : "In sync. Tap to resync";
+  const tip = resyncing ? "Resyncing…" : offline ? "Offline. Tap to reconnect" : behind ? "Behind the table. Tap to resync" : "In sync. Tap to resync";
   b.dataset.tip = tip; b.setAttribute("aria-label", tip);
 }
 document.addEventListener("visibilitychange", () => {
@@ -748,7 +748,7 @@ function renderRuler() {
   $("rulerCard").innerHTML = `
     <div class="ruler-top">${avHTML(myLook(), "xl")}
       <div><p class="ruler-name">@${esc(myName || "unnamed ruler")}</p>
-        <p class="ruler-rank">${esc(rankOf(lvl))} Â· Level ${lvl}</p>
+        <p class="ruler-rank">${esc(rankOf(lvl))} · Level ${lvl}</p>
         <div class="xpbar"><i style="width:${(into / n * 100).toFixed(1)}%"></i></div>
         <div class="xp-line"><span>${into.toLocaleString()} / ${n.toLocaleString()} XP</span><span>${profile.xp.toLocaleString()} total</span></div></div></div>
     <dl class="stats">
@@ -770,7 +770,7 @@ function renderStandings() {
       const look = me ? myLook() : { face: d.face, img: d.img, lvl };
       return `<li class="row std ${me ? "me" : ""} ${i < 3 ? `top${i + 1}` : ""}"><span class="rank-n">${i + 1}</span>${avHTML(look, "")}
         <span class="row-main"><span class="row-title">@${esc((me ? myName || "unnamed ruler" : d.name) || "unknown ruler")}${me ? " (you)" : ""}</span>
-          <span class="row-sub">${esc(rankOf(lvl))} Â· Level ${lvl} Â· ${plural(d.stats.wins, "victory", "victories")}</span></span>
+          <span class="row-sub">${esc(rankOf(lvl))} · Level ${lvl} · ${plural(d.stats.wins, "victory", "victories")}</span></span>
         <span class="xp-num">${d.xp.toLocaleString()} XP</span></li>`;
     }).join("")
     : `<li class="empty">Nobody has earned XP yet. Finish a game to claim the top spot.</li>`;
@@ -868,7 +868,7 @@ function renderProfile() {
   renderAccount();
   const lvl = levelOf(profile.xp).lvl;
   $("pfBig").innerHTML = avHTML({ face: draft.face, img: draft.img, lvl }, "xxl");
-  $("pfRank").textContent = `${rankOf(lvl)} Â· Level ${lvl}`;
+  $("pfRank").textContent = `${rankOf(lvl)} · Level ${lvl}`;
   $("pfClearImg").hidden = !draft.img;
   const f = draft.face;
   $("pfSpecies").innerHTML = SPECIES.map((name, i) => `<button class="sp" type="button" data-face="s" data-val="${i}" aria-pressed="${f.s === i}">
@@ -939,11 +939,11 @@ function renderPacks() {
   $("packList").innerHTML = allPacks().map(p => {
     const mine = !p.builtin && p.by === ME;
     const kind = KINDS.find(k => k.kind === p.kind);
-    const by = `${kind && p.builtin ? `${kind.label} Â· ` : ""}${packBy(p)}${mine ? " (you)" : ""}`;
+    const by = `${kind && p.builtin ? `${kind.label} · ` : ""}${packBy(p)}${mine ? " (you)" : ""}`;
     return `<li class="row">
       <span class="avatar">${identicon(p.id)}</span>
       <span class="row-main"><span class="row-title">${esc(p.name)}</span>
-        <span class="row-sub">${by} Â· ${plural(p.black.length, "prompt", "prompts")} Â· ${plural(p.white.length, "answer", "answers")}</span></span>
+        <span class="row-sub">${by} · ${plural(p.black.length, "prompt", "prompts")} · ${plural(p.white.length, "answer", "answers")}</span></span>
       <span class="row-actions">
         ${mine ? `<button class="btn small icon" type="button" data-edit-pack="${esc(p.id)}" data-tip="Edit" aria-label="Edit ${esc(p.name)}">${ICONS.pencil}</button>` : ""}
         <button class="btn small icon" type="button" data-copy-pack="${esc(p.id)}" data-tip="Make a copy" aria-label="Copy ${esc(p.name)}" ${db && canWrite ? "" : "disabled"}>${ICONS.copy}</button>
@@ -964,7 +964,7 @@ function renderLobby() {
   }
   const host = isHost();
   const ids = Object.keys(P).sort(byJoined);
-  $("playersHead").innerHTML = `${ICONS.users}Players Â· ${ids.length} of ${settings().maxPlayers}`;
+  $("playersHead").innerHTML = `${ICONS.users}Players · ${ids.length} of ${settings().maxPlayers}`;
   fetchPeople(ids.map(pid => P[pid].uid));
   $("lobbyPlayers").innerHTML = ids.map(pid => {
     const away = gone(pid) || !online(pid), look = lookOf(pid);
@@ -986,7 +986,7 @@ function renderLobby() {
     const bulk = host && list.length > 1 ? `<button class="btn small" type="button" data-pack-group="${k.kind}" data-on="${all1 ? 0 : 1}">${all1 ? "None" : "All"}</button>` : "";
     return `<li class="pg ${open ? "open" : ""}">
       <div class="pg-head"><button class="pg-name" type="button" data-pack-open="${k.kind}" aria-expanded="${open}">${ICONS.chev}<span>${k.label}</span><b class="${on ? "on" : ""}">${on}/${list.length}</b></button>${bulk}</div>
-      ${open ? `${k.hint ? `<p class="hint">${k.hint}</p>` : ""}<div class="pchips">${list.map(p => `<label class="pchip" title="${packBy(p)} Â· ${p.black.length} black Â· ${p.white.length} white">
+      ${open ? `${k.hint ? `<p class="hint">${k.hint}</p>` : ""}<div class="pchips">${list.map(p => `<label class="pchip" title="${packBy(p)} · ${p.black.length} black · ${p.white.length} white">
         <input type="checkbox" id="pk-${esc(p.id)}" data-pack="${esc(p.id)}" ${chosen.has(p.id) ? "checked" : ""} ${off}><span>${esc(p.name)}</span></label>`).join("")}</div>` : ""}</li>`;
   }).join("");
   const fields = keys => SETTINGS.filter(o => keys.includes(o.key)).map(o => {
@@ -1246,7 +1246,7 @@ async function boot() {
   const use = name => window.claude && window.claude.use ? window.claude.use(name).catch(() => null) : Promise.resolve(null);
   let [d, r, u] = await Promise.all([use("db"), use("room"), use("user")]);
   if (!d && FIREBASE) {
-    notice("Connecting to the game serverâ€¦", { sticky: true });
+    notice("Connecting to the game server…", { sticky: true });
     try { [d, r, u] = await firebaseBackend(); notice(""); }
     catch (e) { console.error(e); notice("Couldn't reach the game server. Check your connection and reload the page.", { error: true, sticky: true }); return render(); }
   }
