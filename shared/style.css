@@ -936,3 +936,44 @@ button.mp-twist:focus-visible, .mp-opt:focus-visible { outline: 2px solid var(--
   .paddle span { font-size: 10px; }
   .sd-turns > li { grid-template-columns: auto minmax(0, 7.5em) minmax(0, 1fr) 3.5ch; }
 }
+/* Touch screens: small icon buttons, slider thumbs and typed numbers get a thumb-sized hit area without growing visually */
+@media (pointer: coarse) {
+  .btn.small:not(.sync) { position: relative; }
+  .btn.small:not(.sync)::before { content: ""; position: absolute; inset: -6px; }
+  .slide input[type=range] { height: 6px; padding: 16px 0; background-clip: content-box; box-shadow: none; }
+  .slide input[type=range]::-webkit-slider-thumb { width: 26px; height: 26px; }
+  .slide input[type=range]::-moz-range-thumb { width: 22px; height: 22px; }
+  .slide .num { min-height: 40px; }
+}
+#viewGame:is([data-game="mp"], [data-game="sd"]) .pile:empty { display: none; }
+/* Monkey Paw: a picked deck wish, the winner's line in the result list, the champion's slip */
+.mp-opt.on { transform: translateY(-4px) rotate(-.6deg); box-shadow: inset 0 0 0 1px rgba(90, 60, 25, .22), inset 0 0 42px rgba(130, 85, 35, .3), 0 0 0 3px var(--mp-wax), 0 14px 26px -12px rgba(0, 0, 0, .7); }
+.mp-onslip { font-style: italic !important; color: var(--mp-sepia); }
+.mp-slip.over .mp-who .av + .av { margin-left: -6px; }
+/* Speed Date: the rating countdown as a recording light; the champion in the spotlight */
+#viewGame[data-game="sd"] .timer { color: var(--sd-pink); font-family: var(--display); font-weight: 900; font-stretch: 68%; text-shadow: 0 0 12px rgba(255, 61, 129, .55); }
+#viewGame[data-game="sd"] .timer .sd-clock { filter: drop-shadow(0 0 4px rgba(255, 61, 129, .8)); animation: pulse 1s ease-in-out infinite; }
+#viewGame[data-game="sd"] .timer .lbl { text-shadow: none; }
+.sd-set.over .sd-air { color: var(--sd-butter); }
+.sd-set.over .sd-air i { box-shadow: 0 0 10px var(--sd-butter); }
+.sd-set.over .sd-spot .pt { box-shadow: 0 0 0 2px var(--sd-butter), 0 0 30px rgba(255, 209, 102, .55); }
+/* Reduced motion: a new trait still announces itself with a short fade; the sweeping bar goes, the number stays */
+@media (prefers-reduced-motion: reduce) {
+  #viewGame .sd-now.flip { animation: sd-fade .3s ease-out !important; }
+  #viewGame .sd-next .bar { visibility: hidden; }
+}
+@keyframes sd-fade { from { opacity: 0; } }
+@media (max-width: 640px) {
+  /* a solid strip behind the floating countdown and button, so text never reads through them */
+  body:has(#viewGame:is([data-game="mp"], [data-game="sd"]):not([hidden]) :is(#timer:not([hidden]), #trayActions .btn))::after { content: ""; position: fixed; z-index: 14; inset: auto 0 0; height: calc(max(16px, env(safe-area-inset-bottom, 0px)) + 66px); background: linear-gradient(to bottom, transparent, var(--bg) 20px); pointer-events: none; }
+  #viewGame:is([data-game="mp"], [data-game="sd"]) { padding-bottom: 100px; }
+  /* while choosing, the wish shrinks so the twists fit on screen */
+  #viewGame[data-game="mp"] .mp-slip.judge { gap: 8px; padding: 14px 16px 16px; }
+  #viewGame[data-game="mp"] .mp-slip.judge .mp-wish { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; font-size: 19px; line-height: 1.22; }
+  .paddle span { font-size: 11.5px; color: var(--ink); opacity: .85; }
+}
+/* Desktop or a shared screen: the wish and the trait take the whole stage */
+@media (min-width: 901px) {
+  .sd-set { max-width: none; }
+  .mp-slip { max-width: 720px; }
+}

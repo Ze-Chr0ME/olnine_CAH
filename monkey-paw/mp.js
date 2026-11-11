@@ -134,7 +134,7 @@ function mpTick(g) {
 }
 /* ---------- Monkey Paw table ---------- */
 /* The table reads like a cursed contract: the wish on a parchment slip, the winning twist sealed in red wax under it. */
-let mpChoice = null, mpLastKey = "", mpHeld = null;
+let mpChoice = null, mpLastKey = "", mpHeld = null, mpWishPick = null;
 const mpGranted = t => String(t || "").replace(/^\s*granted\s*,?\s*(but\s*,?)?\s*/i, "");
 const mpLong = t => String(t || "").length > 110 ? "long" : "";
 const mpRoman = n => [[10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]].reduce((s, [v, r]) => { while (n >= v) { s += r; n -= v; } return s; }, "");
@@ -152,7 +152,7 @@ const MP_SEAL = (() => {
 })();
 /* The countdown face: a withered paw that curls one finger for every fifth of the time used up. */
 function mpClock(g, left) {
-  const s = settings(), total = (g.phase === "judge" ? s.judgeTime : s.mpTime) || left || 1;
+  const s = settings(), total = (g.phase === "judge" ? s.judgeTime : g.phase === "result" ? s.next : s.mpTime) || left || 1;
   const up = Math.max(0, Math.min(5, Math.ceil(left / total * 5)));
   const F = [[8.4, 11.6, -16], [11, 10.4, -6], [13.8, 10.4, 5], [16.3, 11.6, 15], [7.4, 15.4, -64]];
   return `<svg class="mp-clock" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
@@ -167,10 +167,19 @@ function mpSlip(g, twist, state) {
     <header class="mp-who">${avHTML(lookOf(w), "sm", false)}<span>${w === ME ? "Your wish" : `@${esc(nameOf(w))} wishes`}</span></header>
     <p class="mp-wish ${mpLong(wish)}">${wish ? esc(wish) : `<span class="mp-ink" aria-label="no wish yet"></span>`}</p>${grant}</article>`;
 }
+/* Game over: the champion's last wish, granted with the usual catch */
+function mpCrown(g) {
+  const c = g.champions || [], me = c.includes(ME), them = c.length > 1 ? "them" : me ? "you" : "them";
+  const who = c.map(p => p === ME ? "you" : `@${esc(nameOf(p))}`).join(" and ");
+  return `<article class="mp-slip granted over">
+    <header class="mp-who">${c.map(p => avHTML(lookOf(p), "sm", false)).join("")}<span>${c.length ? (me && c.length === 1 ? "Your last wish" : `${who}'s last wish`) : "Nobody's last wish"}</span></header>
+    <p class="mp-wish">${c.length ? "I wish I'd win." : "I wish somebody would win."}</p>
+    <div class="mp-grant">${MP_SEAL}<p><em>Granted, but</em> ${c.length ? `now everyone at this table wants ${them} dead.` : "nobody did."}</p></div></article>`;
+}
 function mpRender(g) {
   const phase = g.phase, w = g.wisher, iWish = w === ME, role = mpRole(), host = isHost(), cfg = settings();
   const key = g.gid + ":" + g.round + ":" + phase, fresh = key !== mpLastKey;
-  if (fresh) { mpLastKey = key; mpChoice = null; }
+  if (fresh) { mpLastKey = key; mpChoice = null; mpWishPick = null; }
   if (mpChoice != null && !(g.order[mpChoice] && present(g.order[mpChoice].pid))) mpChoice = null;
   const mine = mpMine(), wished = !!mpSeatText(g, ME, "wish");
   const twisted = pid => phase === "twist" ? !!mpSeatText(g, pid, "twist") : g.order.some(a => a.pid === pid);
@@ -183,12 +192,12 @@ function mpRender(g) {
   updateTimer();
 
   /* The slip: the wish, and under it the twist the wisher is holding up, or the one that won */
-  const held = canPick && mpChoice != null ? g.order[mpChoice] : null;
+  const held = canPick && mpChoice != null && !(typeof matchMedia === "function" && matchMedia("(max-width: 640px)").matches) ? g.order[mpChoice] : null;   // on a phone the choice stays in the list, so the list doesn't jump
   const shown = held || ((phase === "result" || phase === "over") ? won : null);
   $("stage").classList.toggle("fresh", fresh);
   $("stage").classList.toggle("swap", !!held && mpHeld !== mpChoice);
   mpHeld = held ? mpChoice : null;
-  $("blackCard").innerHTML = mpSlip(g, shown, held ? "held" : shown ? "granted" : phase);
+  $("blackCard").innerHTML = phase === "over" ? mpCrown(g) : mpSlip(g, shown, held ? "held" : shown ? "granted" : phase);
 
   let status;
   if (role === "spectator" && !["result", "over"].includes(phase)) status = `<b class="cue">Watching.</b> You're in from the next wish.`;
@@ -209,7 +218,7 @@ function mpRender(g) {
 
   tableSide(g, {
     won: pid => phase === "over" ? (g.champions || []).includes(pid) : phase === "result" && wp === pid,
-    chip: pid => pid === w ? `<span class="chip czar">wisher</span>`
+    chip: pid => pid === w && phase !== "over" ? `<span class="chip czar">wisher</span>`
       : phase === "twist" ? (twisted(pid) ? `<span class="chip done">sealed</span>` : `<span class="chip">${pid === ME ? "your move" : `scheming<span class="dots"></span>`}</span>`) : "",
     empty: "No wishes ruined yet. The cruelest twists land here."
   });
@@ -218,8 +227,8 @@ function mpRender(g) {
   if (phase === "wish") {
     if (iWish && !wished) {
       title = "Make a wish";
-      hint = g.wishCards.length ? "Tap one to wish for it, or write your own." : "";
-      body = (g.wishCards.length ? `<div class="mp-opts">${g.wishCards.map((t, i) => `<button type="button" class="mp-opt" style="--i:${i}" data-mp-wish="${i}" title="Wish for this">
+      hint = g.wishCards.length ? "Pick one, or write your own." : "";
+      body = (g.wishCards.length ? `<div class="mp-opts">${g.wishCards.map((t, i) => `<button type="button" class="mp-opt${mpWishPick === i ? " on" : ""}" style="--i:${i}" data-mp-wish="${i}" aria-pressed="${mpWishPick === i}" title="Choose this wish">
         <span class="mp-n">${mpRoman(i + 1)}</span><p class="${mpLong(t)}">${esc(t)}</p></button>`).join("")}</div>` : "")
         + composer("mpForm", key, g.wishCards.length ? "Or write your own" : "I wish", "I wish I could eat anything without getting fat.", 200);
       action = `<button class="btn primary" type="submit" form="mpForm">${ICONS.send}Make the wish</button>`;
@@ -236,11 +245,12 @@ function mpRender(g) {
     } else idle = true;
   } else {
     title = phase === "judge" ? "The twists" : "Who wrote what";
-    hint = canPick ? (picked ? "Kept. The paw is granting it." : "Tap one to hold it up against your wish.") : phase === "judge" ? `Anonymous until @${nameOf(w)} chooses.` : "";
+    hint = canPick ? (picked ? "Kept. The paw is granting it." : "Tap the one you'd hate most, then keep it.") : phase === "judge" ? `Anonymous until @${nameOf(w)} chooses.` : "";
     body = `<ol class="mp-twists">${g.order.map((a, k) => {
       const gone1 = !present(a.pid), tap = canPick && !gone1 && !picked, open = phase !== "judge";
       const cls = ["mp-twist", canPick && mpChoice === k ? "chosen" : "", open && k === g.winner ? "won" : "", open && a.pid === ME ? "mine" : "", gone1 && !open ? "gone" : ""].filter(Boolean).join(" ");
-      const inner = `<span class="mp-n">${mpRoman(k + 1)}</span><p class="${mpLong(a.text)}"><em>Granted, but</em> ${esc(mpGranted(a.text))}</p>
+      const onSlip = phase === "result" && k === g.winner;   // the winner is already written on the slip above; here it only names its author
+      const inner = `<span class="mp-n">${mpRoman(k + 1)}</span>${onSlip ? `<p class="mp-onslip">On the slip</p>` : `<p class="${mpLong(a.text)}"><em>Granted, but</em> ${esc(mpGranted(a.text))}</p>`}
         ${open ? `<span class="mp-auth">${avHTML(lookOf(a.pid), "sm", false)}${a.pid === ME ? "You" : `@${esc(nameOf(a.pid))}`}</span>` : ""}${open && k === g.winner ? MP_SEAL : ""}`;
       return `<li style="--i:${k}">${tap ? `<button type="button" class="${cls}" data-mp-sub="${k}" aria-pressed="${mpChoice === k}">${inner}</button>` : `<div class="${cls}">${inner}</div>`}</li>`;
     }).join("")}</ol>`;
@@ -260,7 +270,7 @@ document.addEventListener("click", e => {
   if (!g || g.type !== "mp") return;
   const b = e.target.closest("[data-mp-wish], [data-mp-sub], [data-act='mp-pick']");
   if (!b || b.disabled) return;
-  if (b.dataset.mpWish != null) mpTakeWish(+b.dataset.mpWish);
+  if (b.dataset.mpWish != null) { const i = +b.dataset.mpWish; mpWishPick = mpWishPick === i ? null : i; render(); }
   else if (b.dataset.mpSub != null) { mpChoice = +b.dataset.mpSub; render(); }
   else if (mpChoice != null) mpPick(mpChoice);
 });
@@ -269,8 +279,15 @@ document.addEventListener("submit", e => {
   if (e.target.id !== "mpForm" || !g || g.type !== "mp") return;
   e.preventDefault();
   const t = e.target.querySelector("textarea").value;
-  if (!mpText(t)) return notice("Write something first.", { error: true });
+  if (g.phase === "wish" && mpWishPick != null && !mpText(t)) return mpTakeWish(mpWishPick);
+  if (!mpText(t)) return notice(g.phase === "wish" && g.wishCards.length ? "Pick a wish or write one first." : "Write something first.", { error: true });
   (g.phase === "wish" ? mpSendWish : mpSendTwist)(t);
 });
 GAMES.mp = { id: "mp", name: "Monkey Paw", min: 3, ownsMin: true, defaults: { mpTime: 60 }, check: mpCheck, start: mpStart, tick: mpTick, render: mpRender, clock: mpClock,
   next: g => mpStartRound(g), skip: g => mpSkipRound(g, "The host skipped this round.") };
+/* Typing your own wish lets go of a picked deck wish */
+document.addEventListener("input", e => {
+  if (mpWishPick == null || !e.target.closest || !e.target.closest("#mpForm")) return;
+  mpWishPick = null;
+  document.querySelectorAll(".mp-opt.on").forEach(b => { b.classList.remove("on"); b.setAttribute("aria-pressed", "false"); });
+});

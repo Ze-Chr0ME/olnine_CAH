@@ -96,7 +96,8 @@ function sdCloseCycle(g, seats) {
     .map(([, t]) => t).filter(t => { if (seen.has(t.pid)) return false; seen.add(t.pid); return t.avg !== null; });
   const best = Math.max(...turns.map(t => t.avg));
   g.cycleWinners = turns.filter(t => t.avg === best).map(t => t.pid);
-  for (const pid of g.cycleWinners) g.scores[pid] = (g.scores[pid] || 0) + 1;
+  for (const pid of g.cycleWinners) { g.scores[pid] = (g.scores[pid] || 0) + 1; g.log.unshift({ h: "R" + g.round, who: pid, what: `best date of the lap, ${best.toFixed(1)} out of 5` }); }
+  g.log = g.log.slice(0, 7);
   g.cycle = []; g.cycleFrom = g.round + 1;
   const champions = g.cycleWinners.filter(pid => g.scores[pid] >= settings().target);
   if (champions.length) sdEndGame(g, champions);
@@ -159,8 +160,18 @@ function sdChips(g, upto, slots, after) {
   return `<ul class="sd-chips">${g.traits.slice(0, upto).map(t => `<li class="${t.by ? "own" : ""}">${t.by ? ICONS.pencil : ""}${esc(t.text)}${after && t.by
     ? `<span class="sd-by">${avHTML(lookOf(t.by), "sm", false)}@${esc(nameOf(t.by))}</span>` : ""}</li>`).join("")}${Array.from({ length: slots }, () => `<li class="todo" aria-hidden="true"></li>`).join("")}</ul>`;
 }
-function sdSet(g, n) {
+/* Game over: the champion takes the spotlight */
+function sdCrown(g) {
+  const c = g.champions || [], top = c[0];
+  const name = !c.length ? "Nobody" : c.map(p => p === ME ? "You" : `@${esc(nameOf(p))}`).join(" & ");
+  return `<article class="sd-set over"><header class="sd-spot">${top ? avHTML(lookOf(top), "lg", false) : ""}<div><span class="sd-air"><i></i>${c.length > 1 ? "Joint champions" : "Champion"}</span>
+    <b>${name}</b></div><span class="sd-no">Final</span></header>
+    ${c.length ? `<div class="sd-score"><b>${g.scores[top] || 0}</b><span>pts</span><em>${c.length > 1 ? "Tied at the top" : "Most dateable"}</em><small>first to ${settings().target}</small></div>`
+      : `<div class="sd-score none"><b>-</b><em>Nobody scored</em></div>`}</article>`;
+}
+function sdSet(g, n, act = "") {
   const phase = g.phase, sp = g.speaker, total = g.traits.length || g.count, cd = sdCount(g), after = phase === "result" || phase === "over";
+  if (phase === "over") return sdCrown(g);
   const air = { write: "Getting ready", reveal: cd ? "Going live" : "On air", rate: "The verdict" }[phase] || "Off air";
   const head = `<header class="sd-spot">${avHTML(lookOf(sp), "lg", false)}<div><span class="sd-air"><i></i>${air}</span>
     <b>${sp === ME ? "You" : `@${esc(nameOf(sp))}`}</b></div><span class="sd-no">Date ${g.round}</span></header>`;
@@ -180,7 +191,7 @@ function sdSet(g, n) {
     const turn = g.turns[g.round];
     if (after && turn && turn.pid === sp) body = turn.avg === null ? `<div class="sd-score none"><b>-</b><em>Nobody rated</em></div>`
       : `<div class="sd-score"><b>${turn.avg.toFixed(1)}</b><span>/5</span><em>${sdWord(turn.avg)}</em><small>${plural(turn.n, "rating", "ratings")}</small></div>`;
-    body += sdChips(g, g.traits.length, 0, after);
+    body += act + sdChips(g, g.traits.length, 0, after);
   }
   if (phase !== "reveal") sdShown = -1;
   return `<article class="sd-set ${phase}">${head}${body}</article>`;
@@ -198,7 +209,9 @@ function sdRender(g) {
   $("rulesLine").textContent = `${g.traits.length || g.count} traits, one every ${g.every}s. The best speaker of each lap gets a point.`;
   updateTimer();
   $("stage").classList.toggle("fresh", fresh);
-  $("blackCard").innerHTML = sdSet(g, n);
+  /* A listener rates right under the speaker's name, above the traits, so the paddles are in reach without scrolling */
+  const paddles = phase === "rate" && role === "listener" ? `<div class="sd-paddles" role="radiogroup" aria-label="Rate @${esc(nameOf(sp))}">${SD_RATES.map(([v, l]) => `<button type="button" class="paddle${myR === v ? " on" : ""}" data-sd-rate="${v}" role="radio" aria-checked="${myR === v}" aria-label="${v}: ${l}" title="${v}: ${l}"><b>${v}</b><span>${l}</span></button>`).join("")}</div>` : "";
+  $("blackCard").innerHTML = sdSet(g, n, paddles);
 
   let status;
   if (role === "spectator" && !["result", "over"].includes(phase)) status = `<b class="cue">Watching.</b> You're in from the next date.`;
@@ -219,7 +232,7 @@ function sdRender(g) {
 
   tableSide(g, {
     won: pid => phase === "over" ? (g.champions || []).includes(pid) : phase === "result" && g.cycleWinners.includes(pid),
-    chip: pid => pid === sp ? `<span class="chip czar">on a date</span>`
+    chip: pid => pid === sp && phase !== "over" ? `<span class="chip czar">on a date</span>`
       : phase === "write" ? (wrote(pid) ? `<span class="chip done">wrote</span>` : `<span class="chip">${pid === ME ? "your move" : `writing<span class="dots"></span>`}</span>`)
       : phase === "rate" ? (rated(pid) ? `<span class="chip done">rated</span>` : `<span class="chip">judging<span class="dots"></span></span>`) : "",
     empty: "No laps finished yet. The best talkers land here."
@@ -228,15 +241,12 @@ function sdRender(g) {
   let title = "", hint = "", body = "", action = "", idle = false;
   if (phase === "write" && role === "listener") {
     title = myT ? "Your trait" : "Your secret trait";
-    hint = myT ? "In the deck. It drops after the first three." : "One short trait. It drops after the first three.";
+    hint = myT ? "Sent. If it's picked, it drops after the first three." : "One short trait. It drops after the first three.";
     if (myT) body = `<p class="sd-mine">${ICONS.pencil}${esc(myT)}</p>`;
     else {
       body = composer("sdForm", key, "Your date", "still lives with their ex", 60);
       action = `<button class="btn primary" type="submit" form="sdForm">${ICONS.send}Add trait</button>`;
     }
-  } else if (phase === "rate" && role === "listener") {
-    title = `Rate @${nameOf(sp)}`;
-    body = `<div class="sd-paddles" role="radiogroup" aria-label="Rate @${esc(nameOf(sp))}">${SD_RATES.map(([v, l]) => `<button type="button" class="paddle${myR === v ? " on" : ""}" data-sd-rate="${v}" role="radio" aria-checked="${myR === v}" aria-label="${v}: ${l}" title="${v}: ${l}"><b>${v}</b><span>${l}</span></button>`).join("")}</div>`;
   } else if (phase === "result" || phase === "over") {
     title = "Dates so far";
     body = `<ol class="sd-turns">${Object.entries(g.turns).sort((a, b) => b[0] - a[0]).slice(0, 12).map(([r, t]) => `<li class="${+r === g.round ? "now" : ""}">${avHTML(lookOf(t.pid), "sm", false)}
@@ -271,8 +281,10 @@ document.addEventListener("submit", e => {
   if (!t) return notice("Write something first.", { error: true });
   sdSendTrait(t);
 });
+/* The rating countdown: a recording light, in the show's neon */
+const sdClock = () => `<svg class="sd-clock" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".45"/><circle cx="12" cy="12" r="5" fill="currentColor"/></svg>`;
 GAMES.sd = {
   id: "sd", name: "Speed Date", min: 2, defaults: { sdCount: 8, sdEvery: 5, sdWrite: 40 },
-  check: sdCheck, start: sdStart, tick: sdTick, render: sdRender,
+  check: sdCheck, start: sdStart, tick: sdTick, render: sdRender, clock: sdClock,
   next: g => sdStartRound(g), skip: g => sdSkipRound(g, "The host skipped this date.")
 };

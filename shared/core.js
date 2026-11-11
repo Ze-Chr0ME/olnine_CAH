@@ -746,16 +746,16 @@ function noteSkew(d) {
   if (Math.abs(s) < 3600e3 && (skew == null || s < skew)) skew = s;
 }
 
-const TIMER_LBL = { pick: "to pick", wish: "to wish", twist: "to twist", write: "to write", rate: "to rate" };
+const TIMER_LBL = { pick: "to pick", wish: "to wish", twist: "to twist", write: "to write", rate: "to rate", result: "next round" };
 function updateTimer() {
   const el = $("timer"), g = L && L.game;
-  const live = g && g.deadline && !["result", "over", "reveal"].includes(g.phase);
+  const live = g && g.deadline && !["over", "reveal"].includes(g.phase) && (g.phase !== "result" || ["mp", "sd"].includes(g.type));   // Monkey Paw and Speed Date keep their result countdown in g.deadline
   el.hidden = !live;
   if (!live) return;
   const left = Math.max(0, Math.ceil((g.deadline + (skew || 0) - Date.now()) / 1000));
   const face = GAMES[g.type] && GAMES[g.type].clock;   // a game can draw its own clock face
   el.innerHTML = `${face ? face(g, left) : ICONS.clock}${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}<span class="lbl"> ${TIMER_LBL[g.phase] || (g.type === "mp" ? "for the wisher" : "for the czar")}</span>`;
-  el.classList.toggle("urgent", left <= 10);
+  el.classList.toggle("urgent", left <= 10 && g.phase !== "result");
 }
 const at = pid => `<strong>@${esc(nameOf(pid))}</strong>`;
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -1094,8 +1094,8 @@ function renderLobby() {
     <fieldset class="setting-section"><legend>${ICONS.clock}Timers</legend><div class="settings-grid">${fields(["mpTime", "judgeTime", "next"], { judgeTime: "Time to choose a twist" })}</div></fieldset>
     <fieldset class="setting-section"><legend>${ICONS.paw}Wish deck</legend>${lang}</fieldset>`
     : gid === "sd" ? `${rules(["target", "maxPlayers"])}
-    <fieldset class="setting-section"><legend>${ICONS.heart}The date</legend><div class="settings-grid">${fields(["sdCount", "sdEvery", "sdWrite", "next"])}</div>
-      ${lang}</fieldset>`
+    <fieldset class="setting-section"><legend>${ICONS.heart}The date</legend><div class="settings-grid">${fields(["sdCount", "sdEvery", "sdWrite", "next"])}</div></fieldset>
+    <fieldset class="setting-section"><legend>${ICONS.cards}Trait deck</legend>${lang}</fieldset>`
     : "";
   const picker = `<div class="game-tiles compact" role="radiogroup" aria-label="Game">${gameTiles("set-game", gid, !host)}</div>`;
   if (!sliding && !(document.activeElement && document.activeElement.dataset.num)) $("lobbySettings").innerHTML = picker + (body || `
