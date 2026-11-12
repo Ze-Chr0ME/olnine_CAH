@@ -1,6 +1,6 @@
 # Party Games
 
-Three party games in one shared room: Cards Against Humanity, Monkey Paw and Speed Date. The CAH game is available now; the other two plug into the shared game registry described in [docs/GAMES.md](docs/GAMES.md).
+Four party games in one shared room: Cards Against Humanity, Monkey Paw, Speed Date and GIF Me; see the shared game registry in [docs/GAMES.md](docs/GAMES.md).
 
 Play at https://ze-chr0me.github.io/party-games/. Source: [Ze-Chr0ME/party-games](https://github.com/Ze-Chr0ME/party-games). GitHub Pages serves these static files directly; there is no build step.
 
@@ -15,6 +15,8 @@ Publish [firestore.rules](firestore.rules) and [database.rules.json](database.ru
 ```sh
 npx firebase-tools deploy --only firestore:rules --project cardsagainsthumanity-9090e
 ```
+
+GIF Me uses Klipy. Paste the public client key from the Klipy Partner Panel into `KLIPY_KEY` in `gif-me/gm.js` and publish the updated Firestore rules for its media hosts. See [the provider contract and UI handoff](docs/GAMES.md#gif-me-gm-min-3) for API details, content filtering configuration and the required "Search KLIPY" placeholder.
 
 Enable GitHub Pages for the repository and publish the root directory. Publish the current Firestore rules before using personal account codes. Codes grant access to a shared profile; keep them private.
 

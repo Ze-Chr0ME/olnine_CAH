@@ -11,6 +11,8 @@ const LANGS = { en: "English", de: "Deutsch", fr: "Français" };
 /* Each numeric setting is a slider from min to max in steps of `step`; the box beside it takes any whole number from min up to `cap`.
    Settings with `none` also allow 0 (no limit, no timer, the host clicks): one step past the slider's max, or an empty box. */
 const SETTINGS = [
+  { key: "gmSearch", icon: "hourglass", label: "Time to find a GIF", min: 15, max: 180, step: 1, cap: 3600, unit: "s", none: "∞", fmt: n => n ? `${n} seconds` : "No timer" },
+  { key: "gmVote", icon: "gavel", label: "Time to vote", min: 10, max: 120, step: 1, cap: 3600, unit: "s", none: "∞", fmt: n => n ? `${n} seconds` : "No timer" },
   { key: "target", icon: "trophy", label: "Points to win", min: 1, max: 20, step: 1, cap: 99, fmt: n => `${n} points` },
   { key: "rounds", icon: "repeat", label: "Round limit", min: 1, max: 30, step: 1, cap: 999, none: "∞", fmt: n => n ? `${n} rounds` : "No limit" },
   { key: "pickTime", icon: "hourglass", label: "Time to pick cards", min: 10, max: 180, step: 1, cap: 3600, unit: "s", none: "∞", fmt: n => n ? `${n} seconds` : "No timer" },
@@ -25,11 +27,12 @@ const SETTINGS = [
 ];
 /* What the menu shows for each game: icon, one-line pitch, what its lobby language picks, the start line. */
 const GAME_UI = {
+  gm: { icon: "eye", pitch: "Find the perfect GIF. Everyone votes.", deck: "Situations", go: "Reaction time." },
   cah: { icon: "cards", pitch: "Fill in the blank. The czar picks the worst.", deck: "Cards", go: "Let the bad answers begin." },
   mp: { icon: "paw", pitch: "Make a wish. Everyone ruins it.", deck: "Wishes", go: "Careful what you wish for." },
   sd: { icon: "heart", pitch: "Keep talking. Your date keeps getting worse.", deck: "Traits", go: "Your date is on the way." }
 };
-const GAME_ORDER = ["cah", "mp", "sd"];
+const GAME_ORDER = ["cah", "mp", "sd", "gm"];
 let homeGame = "cah";
 /* Radio tiles for picking a game; `name` keeps the home menu and the lobby picker apart. */
 function gameTiles(name, chosen, off) {
@@ -463,6 +466,7 @@ async function enterLobby(c) {
   render();
 }
 function listen(c) {
+  if (typeof gmStopMedia === "function") gmStopMedia();
   unsubLobby && unsubLobby(); unsubPlayers && unsubPlayers();
   unsubLobby = db.doc("lobbies/" + c).onSnapshot(snap => {
     if (!snap.exists) { if (seenLobby) exitLobby("The lobby was closed."); return; }
@@ -487,6 +491,7 @@ function listen(c) {
   }, dbErr);
 }
 function exitLobby(msg) {
+  if (typeof gmStopMedia === "function") gmStopMedia();
   unsubLobby && unsubLobby(); unsubPlayers && unsubPlayers();
   unsubLobby = unsubPlayers = null;
   clearTimeout(nextTimer); nextKey = "";
@@ -517,7 +522,10 @@ async function leaveLobby() {
           }
         });
       }
-      else if (!others.length) { await db.doc("directory/" + c).delete(); await db.doc("lobbies/" + c).delete(); }
+      else if (!others.length) {
+        await db.doc("directory/" + c).delete(); await db.doc("lobbies/" + c).delete();
+        await db.doc(`lobbies/${c}/media/sit`).delete().catch(() => {});
+      }
     }
     await db.doc(`lobbies/${c}/players/${ME}`).delete();
   } catch (e) { writeError(e); }
@@ -531,6 +539,7 @@ async function closeLobby(c) {
   await db.doc(`lobbies/${c}/deck/piles`).delete().catch(() => {});
   await db.doc("directory/" + c).delete();
   await db.doc("lobbies/" + c).delete();
+  await db.doc(`lobbies/${c}/media/sit`).delete().catch(() => {});
 }
 /* Lobbies abandoned for days get cleared out so the store doesn't fill up. */
 async function pruneOldLobbies() {
@@ -585,6 +594,7 @@ let writing = false, dirty = false, lastDir = "", lastDirAt = 0, lastBeat = 0;
 const hostStamp = () => firebaseAccountUser ? firebase.firestore.FieldValue.serverTimestamp() : Date.now();
 async function commit() {
   if (!isHost() || leaving) return;
+  if (typeof gmSyncMedia === "function") gmSyncMedia();
   L.settings = settings(); L.clockHost = ME; L.hostUid = firebaseAccountUser || uid;
   L.rev = (L.rev || 0) + 1; L.updated = Date.now();
   dirty = true; render();
@@ -598,6 +608,7 @@ async function commit() {
       const saved = await db.runTransaction(async tx => {
         const ref = db.doc("lobbies/" + c), snap = await tx.get(ref);
         if (!snap.exists || snap.data().host !== ME || (snap.data().hostUid && snap.data().hostUid !== (firebaseAccountUser || uid)) || snap.data().rev >= body.rev) return false;
+        if (typeof gmCommitMedia === "function") gmCommitMedia(tx, c, snap.data().game, body.game);
         tx.set(ref, { ...body, hostSeen: hostStamp() }); return true;
       });
       if (saved) { lastBeat = Date.now(); await syncDirectory(c, body); }
@@ -653,7 +664,7 @@ async function maybeTakeOver(force) {
   finally { takingOver = false; }
 }
 
-function afterChange() { trackPresence(); earn(); render(); hostTick(); }
+function afterChange() { if (typeof gmSyncMedia === "function") gmSyncMedia(); trackPresence(); earn(); render(); hostTick(); }
 
 /* ---------- staying in sync ----------
    Phones drop or stall their connection when the screen sleeps, the app is switched or the network changes,
@@ -746,10 +757,10 @@ function noteSkew(d) {
   if (Math.abs(s) < 3600e3 && (skew == null || s < skew)) skew = s;
 }
 
-const TIMER_LBL = { pick: "to pick", wish: "to wish", twist: "to twist", write: "to write", rate: "to rate", result: "next round" };
+const TIMER_LBL = { pick: "to pick", wish: "to wish", twist: "to twist", write: "to write", rate: "to rate", result: "next round", set: "to set the scene", search: "to find a GIF", vote: "to vote" };
 function updateTimer() {
   const el = $("timer"), g = L && L.game;
-  const live = g && g.deadline && !["over", "reveal"].includes(g.phase) && (g.phase !== "result" || ["mp", "sd"].includes(g.type));   // Monkey Paw and Speed Date keep their result countdown in g.deadline
+  const live = g && g.deadline && !["over", "reveal"].includes(g.phase) && (g.phase !== "result" || ["mp", "sd", "gm"].includes(g.type));   // These games keep their result countdown in g.deadline
   el.hidden = !live;
   if (!live) return;
   const left = Math.max(0, Math.ceil((g.deadline + (skew || 0) - Date.now()) / 1000));
@@ -1093,6 +1104,9 @@ function renderLobby() {
   const body = gid === "mp" ? `${rules(["target", "maxPlayers"])}
     <fieldset class="setting-section"><legend>${ICONS.clock}Timers</legend><div class="settings-grid">${fields(["mpTime", "judgeTime", "next"], { judgeTime: "Time to choose a twist" })}</div></fieldset>
     <fieldset class="setting-section"><legend>${ICONS.paw}Wish deck</legend>${lang}</fieldset>`
+    : gid === "gm" ? `${rules(["target", "maxPlayers"])}
+    <fieldset class="setting-section"><legend>${ICONS.clock}Timers</legend><div class="settings-grid">${fields(["gmSearch", "gmVote", "next"])}</div></fieldset>
+    <fieldset class="setting-section"><legend>${ICONS.cards}Situation deck</legend>${lang}</fieldset>`
     : gid === "sd" ? `${rules(["target", "maxPlayers"])}
     <fieldset class="setting-section"><legend>${ICONS.heart}The date</legend><div class="settings-grid">${fields(["sdCount", "sdEvery", "sdWrite", "next"])}</div></fieldset>
     <fieldset class="setting-section"><legend>${ICONS.cards}Trait deck</legend>${lang}</fieldset>`

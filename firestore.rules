@@ -54,8 +54,24 @@ service cloud.firestore {
           : kind == 'sub' ? a.keys().hasOnly(['gid', 'round', 'cards']) && a.cards is list && a.cards.size() <= 3 && a.cards.join('').size() <= 450
           : a.keys().hasOnly(['gid', 'round', 'ks']) && a.ks is list && a.ks.size() <= 20 && a.ks.hasOnly([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19])));
     }
+    function gmSeatAction(a, kind) {
+      return a == null || (a is map && a.gid is string && a.gid.size() <= 64
+        && a.round is int && a.round >= 0
+        && (kind == 'sit' ? a.keys().hasOnly(['gid', 'round', 'text', 'photo']) && a.text is string && a.text.size() <= 200 && a.photo is bool
+          : a.keys().hasOnly(['gid', 'round', 'id', 'url', 'still', 'w', 'h'])
+            && a.id is string && a.id.size() <= 64
+            && a.url is string && a.url.size() <= 300 && a.url.matches('^https://static[12]?[.]klipy[.]com/.*')
+            && a.still is string && a.still.size() <= 300 && a.still.matches('^https://static[12]?[.]klipy[.]com/.*')
+            && a.w is int && a.w > 0 && a.w <= 2000 && a.h is int && a.h > 0 && a.h <= 2000));
+    }
+    function seatAction(d, key, kind) {
+      let a = d.get(key, null);
+      // Validate new values; retained actions need no revalidation on seat refresh.
+      return (request.method == 'update' && a == resource.data.get(key, null))
+        || (kind == 'sit' || kind == 'gif' ? gmSeatAction(a, kind) : action(a, kind));
+    }
     function seat(d) {
-      return d.keys().hasOnly(['owner', 'uid', 'name', 'face', 'lvl', 'joined', 'sub', 'pick', 'reveal', 'wish', 'twist', 'trait', 'rate'])
+      return d.keys().hasOnly(['owner', 'uid', 'name', 'face', 'lvl', 'joined', 'sub', 'pick', 'reveal', 'wish', 'twist', 'trait', 'rate', 'sit', 'gif', 'vote'])
         && d.owner == request.auth.uid && d.name is string && d.name.size() <= 20
         && (d.uid == null || (d.uid is string && d.uid.size() <= 128))
         && d.joined is number && d.lvl is number && d.lvl >= 1 && d.lvl <= 1000000
@@ -65,9 +81,10 @@ service cloud.firestore {
         && d.face.e is int && d.face.e >= 0 && d.face.e < 6
         && d.face.a is int && d.face.a >= 0 && d.face.a < 8
         && d.face.b is int && d.face.b >= 0 && d.face.b < 6
-        && action(d.get('wish', null), 'text') && action(d.get('twist', null), 'text')
-        && action(d.get('trait', null), 'text') && action(d.get('pick', null), 'pick')
-        && action(d.get('rate', null), 'rate') && action(d.get('sub', null), 'sub') && action(d.get('reveal', null), 'reveal');
+        && seatAction(d, 'wish', 'text') && seatAction(d, 'twist', 'text')
+        && seatAction(d, 'trait', 'text') && seatAction(d, 'pick', 'pick')
+        && seatAction(d, 'sit', 'sit') && seatAction(d, 'gif', 'gif') && seatAction(d, 'vote', 'pick')
+        && seatAction(d, 'rate', 'rate') && seatAction(d, 'sub', 'sub') && seatAction(d, 'reveal', 'reveal');
     }
     match /lobbies/{code} {
       allow read: if signedIn();
@@ -93,10 +110,34 @@ service cloud.firestore {
               || request.resource.data.game.diff(resource.data.game).affectedKeys().hasOnly(['deadline', 'startAt']))));
       allow delete: if code.matches('^[A-Z]{4}$') && host(code);
       match /players/{pid} {
+        function gmAction(a, before, kind) {
+          let game = get(/databases/$(database)/documents/lobbies/$(code)).data.game;
+          return game.type == 'gm' && game.gid == a.gid && game.round == a.round
+            && (before == null || before.gid != a.gid || before.round != a.round)
+            && (kind == 'sit' ? game.phase == 'set' && game.setter == pid
+              : kind == 'gif' ? game.phase == 'search' && game.setter != pid
+              : game.phase == 'vote');
+        }
+        function gmClear(before) {
+          let game = get(/databases/$(database)/documents/lobbies/$(code)).data.get('game', null);
+          return game == null || game.get('type', null) != 'gm' || game.get('gid', null) != before.gid
+            || game.get('round', null) != before.round;
+        }
+        function gmChange(key) {
+          let a = request.resource.data.get(key, null);
+          let before = resource.data.get(key, null);
+          // Unchanged actions skip the lobby lookup; current-round actions stay locked when cleared.
+          return a == before || (a == null ? gmClear(before) : gmAction(a, before, key));
+        }
         allow read: if signedIn();
-        allow create: if signedIn() && pid.matches('^p[a-z0-9]{12}$') && (!('owner' in request.resource.data) || seat(request.resource.data))
+        allow create: if signedIn() && pid.matches('^p[a-z0-9]{12}$')
+          && request.resource.data.get('sit', null) == null && request.resource.data.get('gif', null) == null
+          && request.resource.data.get('vote', null) == null
+          && (!('owner' in request.resource.data) || seat(request.resource.data))
           && exists(/databases/$(database)/documents/lobbies/$(code));
         allow update: if signedIn() && pid.matches('^p[a-z0-9]{12}$')
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['sit', 'gif', 'vote'])
+            || (gmChange('sit') && gmChange('gif') && gmChange('vote')))
           && ((!('owner' in resource.data)
               && (!('owner' in request.resource.data) || request.resource.data.owner == request.auth.uid))
             || (resource.data.owner == request.auth.uid && seat(request.resource.data)
@@ -107,6 +148,26 @@ service cloud.firestore {
       match /deck/{doc} {
         allow read: if signedIn();
         allow write: if doc == 'piles' && host(code);
+      }
+      match /media/{doc} {
+        function setterPhoto(d) {
+          let lobby = /databases/$(database)/documents/lobbies/$(code);
+          let game = get(lobby).data.game;
+          return exists(lobby) && game.type == 'gm' && game.phase == 'set'
+            && game.gid == d.gid && game.round == d.round && game.setter == d.pid
+            && ownsSeat(code, d.pid);
+        }
+        allow read: if signedIn();
+        allow create, update: if signedIn() && doc == 'sit'
+          && request.resource.data.keys().hasOnly(['gid', 'round', 'pid', 'uid', 'data'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.gid is string && request.resource.data.gid.size() <= 64
+          && request.resource.data.round is int && request.resource.data.round >= 0
+          && request.resource.data.pid is string && request.resource.data.pid.size() <= 64
+          && request.resource.data.data is string && request.resource.data.data.size() <= 200000
+          && request.resource.data.data.matches('^data:image/jpeg;base64,[A-Za-z0-9+/]+={0,2}$')
+          && setterPhoto(request.resource.data);
+        allow delete: if host(code) || (signedIn() && resource.data.uid == request.auth.uid);
       }
     }
     match /directory/{code} {

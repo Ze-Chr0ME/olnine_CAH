@@ -697,10 +697,15 @@ button.card:disabled { cursor: default; opacity: .55; }
 .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .game-tile.g-mp { --signal: #b3261c; --signal-edge: #7d140e; --on-signal: #fbeedd; --signal-soft: rgba(179, 38, 28, .14); }
 .game-tile.g-sd { --signal: #ff3d81; --signal-edge: #d91f63; --on-signal: #1a0610; --signal-soft: rgba(255, 61, 129, .13); }
+.game-tile.g-gm { --signal: #c6f432; --signal-edge: #98c21a; --on-signal: #141a02; --signal-soft: rgba(198, 244, 50, .13); }
 #viewGame[data-game="mp"] {
   --mp-paper: #efe3c8; --mp-ink: #2b1d12; --mp-sepia: #6e563a; --mp-wax: #a3221a; --mp-wax-dark: #6f120d; --mp-red-ink: #8c1810;
   --mp-serif: "IM Fell English", "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
   --signal: #b3261c; --signal-edge: #7d140e; --signal-hover: #c42f22; --on-signal: #fbeedd; --signal-soft: rgba(179, 38, 28, .15); --meter: #c13a26;
+}
+#viewGame[data-game="gm"] {
+  --gm-lime: #c6f432; --gm-night: #0c0d12; --gm-check: rgba(255, 255, 255, .035);
+  --signal: #c6f432; --signal-edge: #98c21a; --signal-hover: #d4ff4d; --on-signal: #141a02; --signal-soft: rgba(198, 244, 50, .14); --meter: #c6f432;
 }
 #viewGame[data-game="sd"] {
   --sd-pink: #ff3d81; --sd-orange: #ff7a2f; --sd-butter: #ffd166; --sd-cream: #fff3e4; --sd-night: #130a10;
@@ -708,22 +713,22 @@ button.card:disabled { cursor: default; opacity: .55; }
 }
 /* Desktop: the tray sits right under the stage, so what you have to do is never below the scoreboard */
 @media (min-width: 901px) {
-  #viewGame:is([data-game="mp"], [data-game="sd"]) { grid-template-columns: minmax(0, 1fr) minmax(0, 320px); grid-template-rows: auto 1fr; column-gap: 20px; align-items: start; }
-  #viewGame:is([data-game="mp"], [data-game="sd"]) .board { display: contents; }
-  #viewGame:is([data-game="mp"], [data-game="sd"]) .stage { grid-area: 1 / 1; }
-  #viewGame:is([data-game="mp"], [data-game="sd"]) .side { grid-area: 1 / 2 / span 2; }
-  #viewGame:is([data-game="mp"], [data-game="sd"]) .tray { grid-area: 2 / 1; }
+  #viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) { grid-template-columns: minmax(0, 1fr) minmax(0, 320px); grid-template-rows: auto 1fr; column-gap: 20px; align-items: start; }
+  #viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .board { display: contents; }
+  #viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .stage { grid-area: 1 / 1; }
+  #viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .side { grid-area: 1 / 2 / span 2; }
+  #viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .tray { grid-area: 2 / 1; }
 }
-#viewGame:is([data-game="mp"], [data-game="sd"]) .stage { grid-template-columns: minmax(0, 1fr) auto; align-items: start; color: var(--ink); }
-#viewGame:is([data-game="mp"], [data-game="sd"]) .stage > .status { grid-area: 1 / 1; align-self: center; min-height: 0; }
-#viewGame:is([data-game="mp"], [data-game="sd"]) .stage > .timer { grid-area: 1 / 2; }
-#viewGame:is([data-game="mp"], [data-game="sd"]) .stage > .stage-row { grid-column: 1 / -1; gap: 24px 32px; }
-#viewGame:is([data-game="mp"], [data-game="sd"]) .timer { gap: 8px; padding: 5px 12px 5px 9px; font-size: 22px; font-weight: 600; letter-spacing: .02em; border-radius: 10px; }
-#viewGame:is([data-game="mp"], [data-game="sd"]) .timer svg { width: 24px; height: 24px; }
-#viewGame:is([data-game="mp"], [data-game="sd"]) .timer .lbl { font: 600 12px/1 var(--body); letter-spacing: 0; color: var(--muted); }
-#viewGame:is([data-game="mp"], [data-game="sd"]) .timer.urgent .lbl { color: inherit; }
-#viewGame:is([data-game="mp"], [data-game="sd"]) .tray.idle { display: none; }
-#viewGame:is([data-game="mp"], [data-game="sd"]) .pile { flex: 1 1 220px; align-self: center; }
+#viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .stage { grid-template-columns: minmax(0, 1fr) auto; align-items: start; color: var(--ink); }
+#viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .stage > .status { grid-area: 1 / 1; align-self: center; min-height: 0; }
+#viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .stage > .timer { grid-area: 1 / 2; }
+#viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .stage > .stage-row { grid-column: 1 / -1; gap: 24px 32px; }
+#viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .timer { gap: 8px; padding: 5px 12px 5px 9px; font-size: 22px; font-weight: 600; letter-spacing: .02em; border-radius: 10px; }
+#viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .timer svg { width: 24px; height: 24px; }
+#viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .timer .lbl { font: 600 12px/1 var(--body); letter-spacing: 0; color: var(--muted); }
+#viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .timer.urgent .lbl { color: inherit; }
+#viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .tray.idle { display: none; }
+#viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .pile { flex: 1 1 220px; align-self: center; }
 .status .cue { font-weight: 800; }
 /* Who the round is waiting on */
 .roster-head { display: flex; justify-content: space-between; gap: 12px; font-family: var(--mono); font-size: 11.5px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
@@ -917,9 +922,9 @@ button.mp-twist:focus-visible, .mp-opt:focus-visible { outline: 2px solid var(--
 @keyframes pop { 0% { transform: scale(1.25); opacity: .4; } 25% { transform: scale(1); opacity: 1; } }
 
 @media (max-width: 640px) {
-  #viewGame:is([data-game="mp"], [data-game="sd"]) .stage { grid-template-columns: minmax(0, 1fr); }
-  #viewGame:is([data-game="mp"], [data-game="sd"]) .timer svg { width: 22px; height: 22px; }
-  #viewGame:is([data-game="mp"], [data-game="sd"]) .timer { font-size: 20px; }
+  #viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .stage { grid-template-columns: minmax(0, 1fr); }
+  #viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .timer svg { width: 22px; height: 22px; }
+  #viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .timer { font-size: 20px; }
   #viewGame[data-game="mp"] .status, #viewGame[data-game="sd"] .status { font-size: 15px; }
   .roster { grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 12px 4px; }
   .mp-slip { padding: 18px 18px 22px; transform: none; }
@@ -945,7 +950,7 @@ button.mp-twist:focus-visible, .mp-opt:focus-visible { outline: 2px solid var(--
   .slide input[type=range]::-moz-range-thumb { width: 22px; height: 22px; }
   .slide .num { min-height: 40px; }
 }
-#viewGame:is([data-game="mp"], [data-game="sd"]) .pile:empty { display: none; }
+#viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) .pile:empty { display: none; }
 /* Monkey Paw: a picked deck wish, the winner's line in the result list, the champion's slip */
 .mp-opt.on { transform: translateY(-4px) rotate(-.6deg); box-shadow: inset 0 0 0 1px rgba(90, 60, 25, .22), inset 0 0 42px rgba(130, 85, 35, .3), 0 0 0 3px var(--mp-wax), 0 14px 26px -12px rgba(0, 0, 0, .7); }
 .mp-onslip { font-style: italic !important; color: var(--mp-sepia); }
@@ -965,8 +970,8 @@ button.mp-twist:focus-visible, .mp-opt:focus-visible { outline: 2px solid var(--
 @keyframes sd-fade { from { opacity: 0; } }
 @media (max-width: 640px) {
   /* a solid strip behind the floating countdown and button, so text never reads through them */
-  body:has(#viewGame:is([data-game="mp"], [data-game="sd"]):not([hidden]) :is(#timer:not([hidden]), #trayActions .btn))::after { content: ""; position: fixed; z-index: 14; inset: auto 0 0; height: calc(max(16px, env(safe-area-inset-bottom, 0px)) + 66px); background: linear-gradient(to bottom, transparent, var(--bg) 20px); pointer-events: none; }
-  #viewGame:is([data-game="mp"], [data-game="sd"]) { padding-bottom: 100px; }
+  body:has(#viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]):not([hidden]) :is(#timer:not([hidden]), #trayActions .btn))::after { content: ""; position: fixed; z-index: 14; inset: auto 0 0; height: calc(max(16px, env(safe-area-inset-bottom, 0px)) + 66px); background: linear-gradient(to bottom, transparent, var(--bg) 20px); pointer-events: none; }
+  #viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]) { padding-bottom: 100px; }
   /* while choosing, the wish shrinks so the twists fit on screen */
   #viewGame[data-game="mp"] .mp-slip.judge { gap: 8px; padding: 14px 16px 16px; }
   #viewGame[data-game="mp"] .mp-slip.judge .mp-wish { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; font-size: 19px; line-height: 1.22; }
@@ -979,7 +984,7 @@ button.mp-twist:focus-visible, .mp-opt:focus-visible { outline: 2px solid var(--
 }
 /* Phones, while you write: the wish or the empty trait slots step back so the box you type in is on screen */
 @media (max-width: 640px) {
-  #viewGame:is([data-game="mp"], [data-game="sd"]):has(#tray .composer) .pile { display: none; }
+  #viewGame:is([data-game="mp"], [data-game="sd"], [data-game="gm"]):has(#tray .composer) .pile { display: none; }
   #viewGame[data-game="sd"]:has(#tray .composer) .sd-set .sd-chips { display: none; }
   #viewGame[data-game="mp"]:has(#tray .composer) .mp-slip.empty { gap: 6px; padding: 12px 16px; }
   #viewGame[data-game="mp"]:has(#tray .composer) .mp-slip.empty .mp-wish { display: none; }
@@ -999,4 +1004,160 @@ button.mp-twist:focus-visible, .mp-opt:focus-visible { outline: 2px solid var(--
   .mp-opts { gap: 8px; }
   .mp-opt { padding: 10px 14px 12px 12px; }
   .mp-opt p { font-size: 16.5px; }
+}
+
+/* ---------- GIF Me ---------- */
+/* An image editor: the scene is a caption layer on a transparency checkerboard and the GIFs are the replies.
+   What you have picked wears marching ants and handles; winning GIFs get pasted onto the scene. */
+#viewGame[data-game="gm"] .stage {
+  --ink: #f1f3ea; --muted: #a9ad9c; --faint: #6d7064; --line: #262a22; --line-strong: #3a4033; --surface: #0c0d12; --sunken: #16181d;
+  background: var(--gm-night); border-color: #1e2119;
+}
+#viewGame[data-game="gm"] .status .cue { margin-right: 4px; font-family: var(--display); font-size: 1.25em; font-weight: 900; font-stretch: 72%; letter-spacing: .01em; text-transform: uppercase; color: var(--gm-lime); }
+#viewGame[data-game="gm"] .status .over { font-family: var(--display); font-size: 1.3em; font-weight: 900; font-stretch: 72%; line-height: 1.1; color: var(--gm-lime); }
+#viewGame[data-game="gm"] .timer { color: var(--gm-lime); font-family: var(--display); font-weight: 900; font-stretch: 70%; }
+#viewGame[data-game="gm"] .timer.urgent { color: #ff5d5d; }
+.gm-clock { fill: none; stroke-width: 2.6; stroke-linecap: round; }
+.gm-clock .trk { stroke: currentColor; opacity: .2; }
+.gm-clock .arc { stroke: currentColor; transition: stroke-dasharray 1s linear; }
+.gm-clock .play { fill: currentColor; stroke: none; }
+#viewGame[data-game="gm"] .roster .mk svg { padding: 4px; border-radius: 50%; background: var(--gm-lime); color: #141a02; box-shadow: 0 0 0 2px var(--surface); }
+
+/* Selection: marching ants on ::after, corner handles on ::before */
+.gm-scene.editing::after, .gm-gif.on::after, .gm-opt.on::after {
+  content: ""; position: absolute; z-index: 2; inset: -3px; pointer-events: none;
+  background: linear-gradient(90deg, var(--gm-lime) 50%, var(--gm-night) 0) 0 0 / 10px 2px repeat-x, linear-gradient(90deg, var(--gm-lime) 50%, var(--gm-night) 0) 0 100% / 10px 2px repeat-x,
+    linear-gradient(0deg, var(--gm-lime) 50%, var(--gm-night) 0) 0 0 / 2px 10px repeat-y, linear-gradient(0deg, var(--gm-lime) 50%, var(--gm-night) 0) 100% 0 / 2px 10px repeat-y;
+  animation: gm-ants .6s linear infinite;
+}
+.gm-scene.editing::before, .gm-gif.on::before, .gm-win::before {
+  content: ""; position: absolute; z-index: 3; inset: -6px; pointer-events: none;
+  --h: linear-gradient(var(--gm-lime) 0 0);
+  background: var(--h) 0 0 / 8px 8px no-repeat, var(--h) 100% 0 / 8px 8px no-repeat, var(--h) 0 100% / 8px 8px no-repeat, var(--h) 100% 100% / 8px 8px no-repeat;
+  filter: drop-shadow(0 0 1px var(--gm-night)) drop-shadow(0 0 1px var(--gm-night));
+}
+
+/* The scene */
+.gm-scene { position: relative; flex: 1 1 340px; display: grid; gap: 14px; align-content: start; min-width: 0; max-width: 760px; padding: 14px 20px 22px; border-radius: 3px;
+  background: conic-gradient(var(--gm-check) 25%, transparent 0 50%, var(--gm-check) 0 75%, transparent 0) 0 0 / 22px 22px, #14161c;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07); animation: gm-in .35s ease-out; }
+.stage:not(.fresh) .gm-scene { animation: none; }
+.gm-who { display: flex; align-items: center; gap: 8px; font: 600 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.gm-lbl { flex: 1; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gm-body { display: grid; gap: 10px; }
+.gm-text { margin: 0; font-family: var(--display); font-size: clamp(26px, 4vw, 40px); font-weight: 900; font-stretch: 74%; line-height: 1.04; letter-spacing: -.005em; color: #fff; overflow-wrap: anywhere; text-wrap: balance; }
+.gm-text.long { font-size: clamp(21px, 3vw, 29px); line-height: 1.1; }
+.gm-text.cap { font-size: clamp(20px, 2.8vw, 28px); line-height: 1.08; }
+.gm-live { text-wrap: pretty; }
+.gm-caret { display: inline-block; width: .09em; min-width: 3px; height: .9em; margin-left: .04em; vertical-align: -.08em; background: var(--gm-lime); animation: gm-blink 1.06s steps(1) infinite; }
+.gm-photo { margin: 0; display: grid; place-items: center; min-height: 160px; border-radius: 2px; overflow: hidden; background: #000; }
+.gm-photo img { display: block; max-width: 100%; max-height: min(56vh, 460px); object-fit: contain; }
+.gm-load { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, .15); border-top-color: var(--gm-lime); animation: spin .8s linear infinite; }
+/* Winning GIFs, pasted on at a slight angle */
+.gm-wins { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 18px; padding: 6px 4px 2px; }
+.gm-win { position: relative; flex: 0 1 calc(var(--r) * 230px); min-width: 0; max-width: 100%; margin: 0; background: var(--gm-night); box-shadow: 0 0 0 2px var(--gm-lime), 0 16px 30px -14px #000;
+  transform: rotate(-1.4deg); animation: gm-paste .5s cubic-bezier(.2, 1.4, .4, 1); }
+.gm-win:nth-child(even) { transform: rotate(1.2deg); }
+.gm-win picture { display: contents; }
+.gm-win img { display: block; width: 100%; height: auto; aspect-ratio: var(--r); max-height: 300px; object-fit: cover; }
+.gm-win figcaption { display: flex; align-items: center; gap: 6px; padding: 6px 10px 6px 6px; font-size: 13px; font-weight: 750; color: #fff; }
+.gm-v { flex: none; font: 700 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--gm-lime); }
+
+/* Tray: deck scenes, the search, the board */
+.gm-tray { min-width: 0; }
+.gm-wrap { display: grid; gap: 14px; }
+.gm-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr)); gap: 10px; }
+.gm-opt { position: relative; display: grid; align-content: start; min-width: 0; min-height: 76px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 3px; background: var(--sunken); color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+  transition: border-color .15s, background-color .15s; animation: deal .3s ease-out backwards; animation-delay: calc(var(--i) * 50ms); }
+.gm-opt:hover { border-color: var(--line-strong); }
+.gm-opt.on { border-color: transparent; background: var(--signal-soft); }
+.gm-opt p { margin: 0; font: 800 16px/1.22 var(--display); overflow-wrap: anywhere; }
+.gm-opt p.long { font-size: 14.5px; }
+.gm-compose { position: relative; max-width: 620px; }
+.gm-compose .composer { max-width: none; padding-right: 58px; }
+.gm-cam { position: absolute; top: 10px; right: 10px; }
+.gm-cam input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.gm-cam:focus-within { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+.gm-search { display: grid; gap: 10px; min-width: 0; }
+.gm-find { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--sunken); }
+.gm-find:focus-within { border-color: var(--signal); box-shadow: 0 0 0 3px var(--signal-soft); }
+.gm-lens svg { display: block; width: 18px; height: 18px; color: var(--muted); }
+.gm-find input { flex: 1; min-width: 0; padding: 8px 0; border: 0; background: none; color: var(--ink); font: 650 17px/1.2 var(--body); }
+.gm-find input:focus { outline: none; }
+.gm-spin { display: block; width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; animation: spin .7s linear infinite; }
+.gm-find .gm-spin, .gm-find.busy button svg { display: none; }
+.gm-find.busy .gm-spin { display: block; }
+.gm-meta { display: flex; justify-content: space-between; gap: 12px; margin: 0; font: 500 11.5px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.gm-meta > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gm-credit { flex: none; font-weight: 700; color: var(--faint); }
+.gm-err { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; padding: 8px 8px 8px 12px; border-radius: 6px; background: rgba(255, 93, 93, .1); color: #ff8a8a; font-size: 14px; font-weight: 650; min-height: 40px; box-sizing: border-box; }
+.gm-none { margin: 0; padding: 18px 0; text-align: center; color: var(--muted); }
+.gm-end { display: flex; justify-content: center; height: 24px; color: var(--muted); }
+.gm-end .gm-spin { visibility: hidden; }
+.gm-end.on .gm-spin { visibility: visible; }
+.gm-grid:empty ~ .gm-end { display: none; }
+/* Justified rows: each GIF's width follows its shape, so a row lines up without cropping and new pages only add rows */
+.gm-grid { --row: 124px; display: flex; flex-wrap: wrap; gap: 6px; }
+.gm-grid:empty { display: none; }
+.gm-grid::after { content: ""; flex: 1000 1 0; }
+.gm-grid > * { flex: var(--r) 1 calc(var(--r) * var(--row)); min-width: 0; }
+.gm-grid.ghost span { display: block; aspect-ratio: var(--r); max-height: calc(var(--row) * 1.6); border-radius: 3px; background: linear-gradient(90deg, var(--sunken), var(--line), var(--sunken)) 0 0 / 200% 100%; animation: gm-shine 1.4s linear infinite; }
+.gm-gif { position: relative; display: block; width: 100%; padding: 0; border: 0; border-radius: 3px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+div.gm-gif { cursor: default; }
+.gm-gif picture { display: contents; }
+.gm-gif img { display: block; width: 100%; height: auto; aspect-ratio: var(--r); max-height: calc(var(--row, 160px) * 1.6); object-fit: cover; border-radius: 3px; background: var(--sunken); }
+button.gm-gif:hover img { filter: brightness(1.1); }
+button.gm-gif:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.gm-gif.on { z-index: 1; }
+.gm-mine { position: relative; justify-self: start; width: min(100%, calc(var(--r) * 190px)); margin: 0; box-shadow: 0 0 0 2px var(--gm-lime); }
+.gm-mine picture { display: contents; }
+.gm-mine img { display: block; width: 100%; height: auto; aspect-ratio: var(--r); object-fit: cover; }
+
+.gm-board { --row: 150px; list-style: none; margin: 0; padding: 4px 0 0; display: flex; flex-wrap: wrap; gap: 14px 12px; align-items: flex-start; }
+.gm-board > li { flex: var(--r) 1 calc(var(--r) * var(--row)); min-width: 0; animation: deal .3s ease-out backwards; animation-delay: calc(var(--i) * 60ms); }
+.gm-pic { position: relative; display: block; }
+/* a lone GIF on the last row is letterboxed rather than cropped: in the vote, the whole joke has to show */
+.gm-board .gm-gif img { max-height: calc(var(--row) * 2); object-fit: contain; background: #000; }
+.gm-n, .gm-tag { position: absolute; z-index: 1; top: 6px; display: grid; place-items: center; height: 24px; box-sizing: border-box; border-radius: 3px; font: 700 12px/1 var(--mono); color: #fff; background: rgba(12, 13, 18, .82); }
+.gm-n { left: 6px; min-width: 24px; padding: 0 6px; }
+.gm-tag { right: 6px; padding: 0 7px; letter-spacing: .06em; text-transform: uppercase; font-size: 10.5px; }
+.gm-tag.pick { background: var(--gm-lime); color: #141a02; }
+.gm-gif.on .gm-tag { display: none; }
+.gm-gif.mine img { opacity: .4; filter: grayscale(.4); }
+.gm-board.open .gm-gif.mine img { opacity: 1; filter: none; }
+.gm-gif.gone img { filter: grayscale(1); opacity: .4; }
+.gm-gif.voted img { box-shadow: 0 0 0 2px var(--gm-lime); }
+.gm-auth { display: flex; align-items: center; gap: 6px; padding: 7px 2px 0; font-size: 13px; font-weight: 700; color: var(--ink); }
+.gm-nm { flex: 1; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes gm-in { from { opacity: 0; transform: translateY(10px) scale(.985); } }
+@keyframes gm-paste { from { opacity: 0; transform: scale(1.25) rotate(4deg); } }
+@keyframes gm-shine { to { background-position: -200% 0; } }
+@keyframes gm-ants { to { background-position: 10px 0, -10px 100%, 0 -10px, 100% 10px; } }
+@keyframes gm-blink { 50% { opacity: 0; } }
+@media (max-width: 640px) {
+  .gm-scene { padding: 12px 14px 16px; gap: 10px; }
+  .gm-text { font-size: clamp(23px, 7.4vw, 30px); }
+  .gm-text.long { font-size: clamp(18px, 5.4vw, 22px); }
+  .gm-text.cap { font-size: clamp(19px, 6vw, 24px); }
+  .gm-photo img { max-height: 40vh; }
+  .gm-wins { gap: 12px; }
+  .gm-wins.many .gm-win { flex: 1 1 0; }
+  .gm-wins.many .gm-v { display: none; }
+  .gm-grid { --row: 96px; gap: 5px; }
+  .gm-board { --row: 96px; gap: 12px 8px; }
+  .gm-opts { grid-template-columns: 1fr; gap: 8px; }
+  .gm-opt { min-height: 0; padding: 11px 12px; }
+  .gm-opt p, .gm-opt p.long { font-size: 15px; }
+  /* while searching, the scene shrinks so the results get the screen */
+  #viewGame[data-game="gm"]:has(#tray .gm-search) .gm-scene { gap: 6px; padding: 10px 12px 12px; }
+  #viewGame[data-game="gm"]:has(#tray .gm-search) .gm-text { font-size: 18px; line-height: 1.15; }
+  #viewGame[data-game="gm"]:has(#tray .gm-search) .gm-photo { min-height: 0; }
+  #viewGame[data-game="gm"]:has(#tray .gm-search) .gm-photo img { max-height: 22vh; }
+  #viewGame[data-game="gm"]:has(#tray :is(.gm-search, .gm-board button)) .pile { display: none; }
+  .gm-find { position: sticky; top: 8px; z-index: 4; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gm-scene, .gm-win, .gm-opt, .gm-board > li { animation: none !important; }
+  .gm-grid.ghost span, .gm-caret, .gm-scene.editing::after, .gm-gif.on::after, .gm-opt.on::after { animation: none; }
 }
