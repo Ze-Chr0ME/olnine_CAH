@@ -5,32 +5,174 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
 
-    // Rulers: everyone reads the standings, each browser writes only its own profile.
+    // A device can edit the account it owns or the account selected with a personal code.
+    function linkedTo(uid) {
+      let link = /databases/$(database)/documents/accountLinks/$(request.auth.uid);
+      return exists(link) && get(link).data.accountId == uid;
+    }
+
+    // Codes are 120 random bits, never public profile fields or listable collections.
+    match /accountKeys/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() && code.matches('^[A-HJ-NP-Z2-9]{24}$')
+        && request.resource.data.keys().hasOnly(['accountId'])
+        && request.resource.data.accountId == request.auth.uid;
+      allow update, delete: if false;
+    }
+    match /accountLinks/{device} {
+      allow get: if signedIn() && request.auth.uid == device;
+      allow list: if false;
+      allow create, update: if signedIn() && request.auth.uid == device
+        && request.resource.data.keys().hasOnly(['accountId', 'code'])
+        && request.resource.data.code is string
+        && request.resource.data.code.matches('^[A-HJ-NP-Z2-9]{24}$')
+        && getAfter(/databases/$(database)/documents/accountKeys/$(request.resource.data.code)).data.accountId == request.resource.data.accountId;
+      allow delete: if signedIn() && request.auth.uid == device;
+    }
+
+    // Rulers: everyone reads the standings; access codes remain in private records.
     match /profiles/{uid} {
       allow read: if true;
-      allow write: if signedIn() && request.auth.uid == uid;
+      allow write: if signedIn() && (request.auth.uid == uid || linkedTo(uid));
     }
 
-    // Lobbies: the host's browser writes the lobby, each player writes their own seat
-    // (the host may also remove seats), so any signed-in browser may write here.
+    function host(code) {
+      return signedIn() && (!exists(/databases/$(database)/documents/lobbies/$(code))
+        || !('hostUid' in get(/databases/$(database)/documents/lobbies/$(code)).data)
+        || get(/databases/$(database)/documents/lobbies/$(code)).data.hostUid == request.auth.uid);
+    }
+    function ownsSeat(code, pid) {
+      return get(/databases/$(database)/documents/lobbies/$(code)/players/$(pid)).data.owner == request.auth.uid;
+    }
+    function action(a, kind) {
+      return a == null || (a is map && a.gid is string && a.gid.size() <= 64
+        && a.round is int && a.round >= 0
+        && (kind == 'text' ? a.keys().hasOnly(['gid', 'round', 'text']) && a.text is string && a.text.size() <= 200
+          : kind == 'pick' ? a.keys().hasOnly(['gid', 'round', 'k']) && a.k is int && a.k >= 0 && a.k < 400
+          : kind == 'rate' ? a.keys().hasOnly(['gid', 'round', 'v']) && a.v is int && a.v >= 1 && a.v <= 5
+          : kind == 'sub' ? a.keys().hasOnly(['gid', 'round', 'cards']) && a.cards is list && a.cards.size() <= 3 && a.cards.join('').size() <= 450
+          : a.keys().hasOnly(['gid', 'round', 'ks']) && a.ks is list && a.ks.size() <= 20 && a.ks.hasOnly([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19])));
+    }
+    function gmSeatAction(a, kind) {
+      return a == null || (a is map && a.gid is string && a.gid.size() <= 64
+        && a.round is int && a.round >= 0
+        && (kind == 'sit' ? a.keys().hasOnly(['gid', 'round', 'text', 'photo']) && a.text is string && a.text.size() <= 200 && a.photo is bool
+          : a.keys().hasOnly(['gid', 'round', 'id', 'url', 'still', 'w', 'h'])
+            && a.id is string && a.id.size() <= 64
+            && a.url is string && a.url.size() <= 300 && a.url.matches('^https://static[12]?[.]klipy[.]com/.*')
+            && a.still is string && a.still.size() <= 300 && a.still.matches('^https://static[12]?[.]klipy[.]com/.*')
+            && a.w is int && a.w > 0 && a.w <= 2000 && a.h is int && a.h > 0 && a.h <= 2000));
+    }
+    function seatAction(d, key, kind) {
+      let a = d.get(key, null);
+      // Validate new values; retained actions need no revalidation on seat refresh.
+      return (request.method == 'update' && a == resource.data.get(key, null))
+        || (kind == 'sit' || kind == 'gif' ? gmSeatAction(a, kind) : action(a, kind));
+    }
+    function seat(d) {
+      return d.keys().hasOnly(['owner', 'uid', 'name', 'face', 'lvl', 'joined', 'sub', 'pick', 'reveal', 'wish', 'twist', 'trait', 'rate', 'sit', 'gif', 'vote'])
+        && d.owner == request.auth.uid && d.name is string && d.name.size() <= 20
+        && (d.uid == null || (d.uid is string && d.uid.size() <= 128))
+        && d.joined is number && d.lvl is number && d.lvl >= 1 && d.lvl <= 1000000
+        && d.face is map && d.face.keys().hasOnly(['s', 'k', 'e', 'a', 'b'])
+        && d.face.s is int && d.face.s >= 0 && d.face.s < 10
+        && d.face.k is int && d.face.k >= 0 && d.face.k < 10
+        && d.face.e is int && d.face.e >= 0 && d.face.e < 6
+        && d.face.a is int && d.face.a >= 0 && d.face.a < 8
+        && d.face.b is int && d.face.b >= 0 && d.face.b < 6
+        && seatAction(d, 'wish', 'text') && seatAction(d, 'twist', 'text')
+        && seatAction(d, 'trait', 'text') && seatAction(d, 'pick', 'pick')
+        && seatAction(d, 'sit', 'sit') && seatAction(d, 'gif', 'gif') && seatAction(d, 'vote', 'pick')
+        && seatAction(d, 'rate', 'rate') && seatAction(d, 'sub', 'sub') && seatAction(d, 'reveal', 'reveal');
+    }
     match /lobbies/{code} {
       allow read: if signedIn();
-      allow write: if signedIn() && code.matches('^[A-Z]{4}$');
+      allow create: if signedIn() && code.matches('^[A-Z]{4}$')
+        && ((!('hostUid' in request.resource.data) && !('hostSeen' in request.resource.data))
+          || (request.resource.data.hostUid == request.auth.uid && request.resource.data.hostSeen == request.time));
+      allow update: if signedIn() && code.matches('^[A-Z]{4}$')
+        // Missing ownership marks a legacy room. Preserve old writes until a device claims it.
+        && ((!('hostUid' in resource.data)
+            && (!('hostUid' in request.resource.data)
+              || (request.resource.data.hostUid == request.auth.uid && request.resource.data.hostSeen == request.time)))
+          || (resource.data.hostUid == request.auth.uid
+          && ((request.resource.data.host == resource.data.host && request.resource.data.hostUid == resource.data.hostUid && request.resource.data.hostSeen == request.time)
+            || (request.resource.data.host != resource.data.host
+              && request.resource.data.hostUid == get(/databases/$(database)/documents/lobbies/$(code)/players/$(request.resource.data.host)).data.owner
+              && request.resource.data.hostSeen == resource.data.hostSeen)))
+          || (ownsSeat(code, request.resource.data.host) && request.resource.data.hostUid == request.auth.uid
+            && resource.data.hostSeen + duration.value(30, 's') < request.time
+            && request.resource.data.hostSeen == request.time
+            && request.resource.data.rev == resource.data.rev + 1
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['host', 'hostUid', 'hostName', 'hostSeen', 'clockHost', 'updated', 'rev', 'game'])
+            && (request.resource.data.game == resource.data.game
+              || request.resource.data.game.diff(resource.data.game).affectedKeys().hasOnly(['deadline', 'startAt']))));
+      allow delete: if code.matches('^[A-Z]{4}$') && host(code);
       match /players/{pid} {
+        function gmAction(a, before, kind) {
+          let game = get(/databases/$(database)/documents/lobbies/$(code)).data.game;
+          return game.type == 'gm' && game.gid == a.gid && game.round == a.round
+            && (before == null || before.gid != a.gid || before.round != a.round)
+            && (kind == 'sit' ? game.phase == 'set' && game.setter == pid
+              : kind == 'gif' ? game.phase == 'search' && game.setter != pid
+              : game.phase == 'vote');
+        }
+        function gmClear(before) {
+          let game = get(/databases/$(database)/documents/lobbies/$(code)).data.get('game', null);
+          return game == null || game.get('type', null) != 'gm' || game.get('gid', null) != before.gid
+            || game.get('round', null) != before.round;
+        }
+        function gmChange(key) {
+          let a = request.resource.data.get(key, null);
+          let before = resource.data.get(key, null);
+          // Unchanged actions skip the lobby lookup; current-round actions stay locked when cleared.
+          return a == before || (a == null ? gmClear(before) : gmAction(a, before, key));
+        }
         allow read: if signedIn();
-        allow write: if signedIn() && pid.matches('^p[a-z0-9]{12}$');
+        allow create: if signedIn() && pid.matches('^p[a-z0-9]{12}$')
+          && request.resource.data.get('sit', null) == null && request.resource.data.get('gif', null) == null
+          && request.resource.data.get('vote', null) == null
+          && (!('owner' in request.resource.data) || seat(request.resource.data))
+          && exists(/databases/$(database)/documents/lobbies/$(code));
+        allow update: if signedIn() && pid.matches('^p[a-z0-9]{12}$')
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['sit', 'gif', 'vote'])
+            || (gmChange('sit') && gmChange('gif') && gmChange('vote')))
+          && ((!('owner' in resource.data)
+              && (!('owner' in request.resource.data) || request.resource.data.owner == request.auth.uid))
+            || (resource.data.owner == request.auth.uid && seat(request.resource.data)
+              && request.resource.data.joined == resource.data.joined));
+        allow delete: if signedIn() && pid.matches('^p[a-z0-9]{12}$')
+          && (!('owner' in resource.data) || resource.data.owner == request.auth.uid || host(code));
       }
-      // The game's draw and discard piles, kept out of the lobby document so players don't download them on every change.
       match /deck/{doc} {
         allow read: if signedIn();
-        allow write: if signedIn() && doc == 'piles';
+        allow write: if doc == 'piles' && host(code);
+      }
+      match /media/{doc} {
+        function setterPhoto(d) {
+          let lobby = /databases/$(database)/documents/lobbies/$(code);
+          let game = get(lobby).data.game;
+          return exists(lobby) && game.type == 'gm' && game.phase == 'set'
+            && game.gid == d.gid && game.round == d.round && game.setter == d.pid
+            && ownsSeat(code, d.pid);
+        }
+        allow read: if signedIn();
+        allow create, update: if signedIn() && doc == 'sit'
+          && request.resource.data.keys().hasOnly(['gid', 'round', 'pid', 'uid', 'data'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.gid is string && request.resource.data.gid.size() <= 64
+          && request.resource.data.round is int && request.resource.data.round >= 0
+          && request.resource.data.pid is string && request.resource.data.pid.size() <= 64
+          && request.resource.data.data is string && request.resource.data.data.size() <= 200000
+          && request.resource.data.data.matches('^data:image/jpeg;base64,[A-Za-z0-9+/]+={0,2}$')
+          && setterPhoto(request.resource.data);
+        allow delete: if host(code) || (signedIn() && resource.data.uid == request.auth.uid);
       }
     }
-
-    // Open-lobby list shown on the home screen.
     match /directory/{code} {
       allow read: if signedIn();
-      allow write: if signedIn() && code.matches('^[A-Z]{4}$');
+      allow write: if code.matches('^[A-Z]{4}$') && host(code);
     }
 
     // Card packs written by players.

@@ -1,0 +1,67 @@
+nsfw-crabs-adjust-humidity 1 null [
+  'white18 identical to EN?',
+  'white128 identical to EN?',
+  'white207 identical to EN?',
+  'white231 identical to EN?',
+  'white237 identical to EN?',
+  'white340 identical to EN?',
+  'white386 identical to EN?',
+  'white446 identical to EN?',
+  'white484 identical to EN?',
+  'white545 identical to EN?'
+]
+nsfw-cats-abiding-horribly 6 null OK
+nsfw-cocks-abreast-hostility 4 null OK
+nsfw-words-against-morality 4 null OK
+nsfw-pigs-against-profanity 7 null [
+  'white13 identical to EN?',
+  'white22 identical to EN?',
+  'white48 identical to EN?',
+  'white129 identical to EN?',
+  'white196 identical to EN?'
+]
+nsfw-evil-apples 1 null [
+  'white82 identical to EN?',
+  'white196 identical to EN?',
+  'white211 identical to EN?',
+  'white218 identical to EN?',
+  'white237 identical to EN?',
+  'white383 identical to EN?'
+]
+nsfw-guards-against-insanity 6 null [
+  'white43 identical to EN?',
+  'white45 identical to EN?',
+  'white61 identical to EN?',
+  'white122 identical to EN?',
+  'white139 identical to EN?',
+  'white233 identical to EN?',
+  'white275 identical to EN?',
+  'white324 identical to EN?',
+  'white330 identical to EN?',
+  'white334 identical to EN?',
+  'white370 identical to EN?',
+  'white404 identical to EN?',
+  'white409 identical to EN?',
+  'white410 identical to EN?',
+  'white412 identical to EN?',
+  'white439 identical to EN?'
+]
+nsfw-depravity 2 null OK
+nsfw-hilarious 1 null [
+  'white76 identical to EN?',
+  'white102 identical to EN?',
+  'white150 identical to EN?',
+  'white185 identical to EN?',
+  'white209 identical to EN?',
+  'white264 identical to EN?',
+  'white268 identical to EN?',
+  'white286 identical to EN?',
+  'white300 identical to EN?',
+  'white315 identical to EN?',
+  'white377 identical to EN?',
+  'white401 identical to EN?',
+  'white500 identical to EN?',
+  'white530 identical to EN?'
+]
+nsfw-skewered-and-roasted 3 null OK
+nsfw-personally-incorrect 4 null OK
