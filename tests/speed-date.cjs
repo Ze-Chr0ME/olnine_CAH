@@ -48,18 +48,20 @@ async function main() {
     for (let i = 2; i <= 12; i++) t.stamp('p' + i, 'trait', { text: 'written ' + i });
     assert.equal(t.tick(), true); assert.equal(g.traits.length, 8);
     assert.deepEqual(Array.from(g.traits.slice(0, 3), v => v.cat), ['gender', 'age', 'height']);
-    assert.equal(g.traits.filter(v => v.by).length, 4);
-    assert.deepEqual(Array.from(g.traits.filter(v => v.by), v => v.by).sort(), ['p10', 'p11', 'p12', 'p9']);
+    assert.equal(g.traits.filter(v => v.by).length, 2);
+    assert.deepEqual(Array.from(g.traits.filter(v => v.by), v => v.by).sort(), ['p11', 'p12']);
+    assert.deepEqual(Array.from(g.traits, v => v.cat), ['gender', 'age', 'height', 'job', 'looks', 'player', 'player', 'dealbreaker_twist']);
+    assert.deepEqual(Array.from(c.sdLineup(g, 0)), ['gender', 'age', 'height', 'job', 'looks', 'habit', 'secret', 'dealbreaker_twist']);
     assert.equal(new Set(g.traits.map(v => v.text)).size, 8);
     t.at(g.startAt - 1); assert.equal(c.sdVisible(g), 0); assert.equal(c.sdNextAt(g), g.startAt);
-    t.at(g.startAt); assert.equal(c.sdVisible(g), 1); assert.equal(c.sdNextAt(g), g.startAt + 5000);
-    t.at(g.startAt + 4999); assert.equal(c.sdVisible(g), 1);
-    t.at(g.startAt + 5000); assert.equal(c.sdVisible(g), 2);
+    t.at(g.startAt); assert.equal(c.sdVisible(g), 1); assert.equal(c.sdNextAt(g), g.startAt + 8000);
+    t.at(g.startAt + 7999); assert.equal(c.sdVisible(g), 1);
+    t.at(g.startAt + 8000); assert.equal(c.sdVisible(g), 2);
     c.skew = 12000; t.at(g.startAt + 12000); assert.equal(c.sdVisible(g), 1);
-    c.skew = 0; t.at(g.startAt + 35000); assert.equal(c.sdVisible(g), 8); assert.equal(c.sdNextAt(g), null);
-    t.at(g.startAt + 42999); assert.equal(t.tick(), false);
-    t.at(g.startAt + 43000); assert.equal(t.tick(), true); assert.equal(g.phase, 'rate');
-    assert.equal(g.deadline, g.startAt + 73000);
+    c.skew = 0; t.at(g.startAt + 56000); assert.equal(c.sdVisible(g), 8); assert.equal(c.sdNextAt(g), null);
+    t.at(g.startAt + 66999); assert.equal(t.tick(), false);
+    t.at(g.startAt + 67000); assert.equal(t.tick(), true); assert.equal(g.phase, 'rate');
+    assert.equal(g.deadline, g.startAt + 97000);
   }
   for (const count of [1, 2, 3, 4, 8, 16]) {
     const t = table(4, { sdCount: count });
@@ -70,7 +72,8 @@ async function main() {
     const deck = g.traits.filter(v => !v.by);
     assert.equal(new Set(deck.map(v => v.cat)).size, deck.length);
     assert.deepEqual(Array.from(g.traits.slice(0, Math.min(3, count)), v => v.cat), ['gender', 'age', 'height'].slice(0, count));
-    assert.ok(g.traits.filter(v => v.by).length <= Math.floor(count / 2));
+    assert.ok(g.traits.filter(v => v.by).length <= Math.floor(count / 3));
+    assert.deepEqual(Array.from(g.traits, v => v.cat), Array.from(t.c.sdLineup(g, g.traits.filter(v => v.by).length)));
   }
   {
     const t = table(2, { sdCount: 10 }); t.reveal();
@@ -266,7 +269,7 @@ async function main() {
     initial.snapshot({ exists: true, data: () => ({ host: 'new', rev: 1, game: { deadline: 500000 } }) });
     assert.equal(initial.L.game.deadline, 500000); assert.equal(initial.commits, 0);
   }
-  // All shipped languages have ten categories. Larger dates stop at category exhaustion,
+  // All shipped languages have twelve categories, dealt in one fixed order. Larger dates stop at category exhaustion,
   // with the actual deck length controlling the reveal-to-rate transition.
   {
     const data = {};
@@ -275,13 +278,13 @@ async function main() {
     for (const lang of ['en', 'de', 'fr']) for (const written of [false, true]) {
       const t = table(2, { lang, sdCount: 15 }), { c } = t, g = c.L.game;
       c.SD_TRAITS = data.pool;
-      assert.equal(Object.keys(data.pool[lang]).length, 10);
+      assert.equal(Object.keys(data.pool[lang]).length, 12);
       assert.equal(c.sdCheck(Object.keys(c.P), c.settings()).ok, true);
       if (written) t.stamp('p2', 'trait', { text: 'A unique player trait' });
       else t.at(g.deadline);
       t.tick();
-      assert.equal(g.traits.length, written ? 11 : 10);
-      assert.deepEqual(Array.from(g.traits.slice(0, 3), v => v.cat), ['gender', 'age', 'height']);
+      assert.equal(g.traits.length, written ? 13 : 12);
+      assert.deepEqual(Array.from(g.traits, v => v.cat), ['gender', 'age', 'height', 'weight', 'job', 'loves', 'looks', 'habit', 'secret', 'redflag', 'relation', ...(written ? ['player'] : []), 'dealbreaker_twist']);
       const deck = g.traits.filter(v => !v.by);
       assert.equal(new Set(deck.map(v => v.cat)).size, deck.length);
       const end = g.startAt + g.traits.length * g.every * 1000 + 3000;
@@ -307,7 +310,7 @@ async function main() {
   {
     const old = table(); old.finish({ p2: 3 });
     const deadline = old.c.L.game.deadline;
-    assert.equal(deadline, 225000); // rate ends at 216000; next is nine seconds
+    assert.equal(deadline, 249000); // rate ends at 240000; next is nine seconds
     const fresh = table();
     fresh.c.L = JSON.parse(JSON.stringify(old.c.L));
     fresh.c.L.host = fresh.c.ME = 'p2';

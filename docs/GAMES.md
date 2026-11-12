@@ -51,7 +51,7 @@ On a wish timeout a random dealt wish is used. On a twist timeout the phase move
 If the wisher leaves, the round is skipped. First to `target` wins.
 
 ### Speed Date (`sd`), min 2
-Rotating speaker. Settings: `sdCount` traits (default 8), `sdEvery` seconds per reveal (default 5), `sdWrite` seconds to write (default 40).
+Rotating speaker. Settings: `sdCount` traits (default 8), `sdEvery` seconds per reveal (default 8), `sdWrite` seconds to write (default 40).
 Phases: `write` (each listener writes one secret trait; seat `trait: {gid, round, text}`; moves on when all are in or at the deadline)
 then `reveal` (`g.traits = [{text, cat, by}]`, `g.startAt` = now + 3000 ms, trait i shows at `startAt + i*sdEvery*1000`,
 computed on every client from the clock, so the reveal costs no extra writes) then `rate` (listeners seat `rate: {gid, round, v}` with v 1..5, 30 s deadline)

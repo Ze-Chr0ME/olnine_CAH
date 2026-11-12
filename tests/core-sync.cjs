@@ -11,7 +11,7 @@ vm.runInContext(part('const DEFAULTS', '/* Card text languages') + part('const S
 const run = s => vm.runInContext(s, c);
 run(`GAMES.cah = { min: 3, defaults: { rounds: 0, pickTime: 90, judgeTime: 60, hand: 7, packs: [] } };
 GAMES.mp = { min: 3, defaults: { mpTime: 60 }, tick: () => { throw Error('below minimum tick'); } };
-GAMES.sd = { min: 2, defaults: { sdCount: 8, sdEvery: 5, sdWrite: 40 } };`);
+GAMES.sd = { min: 2, defaults: { sdCount: 8, sdEvery: 8, sdWrite: 40 } };`);
 for (const bad of [undefined, null, '999', {}, NaN, Infinity]) {
   c.bad = bad;
   assert.equal(run('settings({mpTime: bad}).mpTime'), 60);

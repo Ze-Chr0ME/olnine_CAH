@@ -4,7 +4,7 @@ Four party games in one shared room: Cards Against Humanity, Monkey Paw, Speed D
 
 Play at https://ze-chr0me.github.io/party-games/. Source: [Ze-Chr0ME/party-games](https://github.com/Ze-Chr0ME/party-games). GitHub Pages serves these static files directly; there is no build step.
 
-Enter a name, create a lobby and share its code, or join an open lobby. The host configures the rules and starts the game. Profiles, portraits, XP and personal account codes are shared across devices through Firebase.
+Pick one of the four games on the opening screen; each game has its own look for its home and lobby. Enter a name, create a lobby and share its code, or join an open lobby. The host configures the rules and starts the game. Profiles, portraits, XP and personal account codes are shared across devices through Firebase. A personal code can also be shown as a QR code: scanning it opens the game on the other device with the code filled in. XP is tracked per game (`gx` in each profile) and each game's home shows its own standings; XP earned before per-game tracking counts as Cards Against Humanity XP.
 
 ## Deploy
 
@@ -19,6 +19,10 @@ npx firebase-tools deploy --only firestore:rules --project cardsagainsthumanity-
 GIF Me uses Klipy. Paste the public client key from the Klipy Partner Panel into `KLIPY_KEY` in `gif-me/gm.js` and publish the updated Firestore rules for its media hosts. See [the provider contract and UI handoff](docs/GAMES.md#gif-me-gm-min-3) for API details, content filtering configuration and the required "Search KLIPY" placeholder.
 
 Enable GitHub Pages for the repository and publish the root directory. Publish the current Firestore rules before using personal account codes. Codes grant access to a shared profile; keep them private.
+
+## Testing locally
+
+Serve the folder from `localhost` (for example `python -m http.server 8765 --bind 127.0.0.1`). On localhost only, `dev/bots.js` loads and the lobby host gets an "Add a bot" seat. The host's browser plays every bot in all four games with random choices. Bots are removed when the host leaves.
 
 ## Files and tests
 
