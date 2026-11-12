@@ -27,13 +27,40 @@ const SETTINGS = [
 ];
 /* What the menu shows for each game: icon, one-line pitch, what its lobby language picks, the start line. */
 const GAME_UI = {
-  gm: { icon: "eye", pitch: "Find the perfect GIF. Everyone votes.", deck: "Situations", go: "Reaction time." },
-  cah: { icon: "cards", pitch: "Fill in the blank. The czar picks the worst.", deck: "Cards", go: "Let the bad answers begin." },
-  mp: { icon: "paw", pitch: "Make a wish. Everyone ruins it.", deck: "Wishes", go: "Careful what you wish for." },
-  sd: { icon: "heart", pitch: "Keep talking. Your date keeps getting worse.", deck: "Traits", go: "Your date is on the way." }
+  gm: { icon: "eye", pitch: "Find the perfect GIF. Everyone votes.", deck: "Situations", go: "Reaction time.", title: "GIF<br>Me" },
+  cah: { icon: "cards", pitch: "Fill in the blank. The czar picks the worst.", deck: "Cards", go: "Let the bad answers begin.", title: "Cards<br>Against<br>Humanity" },
+  mp: { icon: "paw", pitch: "Make a wish. Everyone ruins it.", deck: "Wishes", go: "Careful what you wish for.", title: "Monkey<br>Paw" },
+  sd: { icon: "heart", pitch: "Keep talking. Your date keeps getting worse.", deck: "Traits", go: "Your date is on the way.", title: "Speed<br>Date" }
 };
 const GAME_ORDER = ["cah", "mp", "sd", "gm"];
-let homeGame = "cah";
+/* The game this tab picked on the opening screen; until then the picker shows. */
+let homeGame = (() => { try { const g = sessionStorage.getItem("pg-game") || ""; return /^(cah|mp|sd|gm)$/.test(g) ? g : ""; } catch { return ""; } })();
+/* The game whose look the page wears: the lobby's game inside a lobby, the picked game at home, none on the picker. */
+function ctxGame(v) {
+  if (code && L) return (L.status !== "lobby" && L.game && GAMES[L.game.type] ? L.game.type : settings().game);
+  if (code) return document.documentElement.dataset.game || "hub";
+  if (v === "packs") return "cah";
+  return v === "pick" || !GAMES[homeGame] ? "hub" : homeGame;
+}
+function applyGame(v) {
+  const g = ctxGame(v), root = document.documentElement;
+  if (root.dataset.game !== g) {
+    root.dataset.game = g;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = getComputedStyle(root).getPropertyValue("--bg").trim();
+  }
+  $("mark").innerHTML = GAME_UI[g] ? `${GAME_UI[g].title}.` : "Party<br>Games.";
+  /* the light/dark themes belong to Cards Against Humanity; every other game wears its own */
+  $("themeBtn").parentNode.hidden = g !== "cah";
+  if (g !== "cah" && menuOpen === "theme") setMenu(null);
+}
+function pickGame(id) {
+  const go = () => {
+    homeGame = GAMES[id] ? id : ""; tab.set("pg-game", homeGame || null);
+    view = homeGame ? "home" : "pick"; artFor = ""; render(); scrollTo(0, 0);
+  };
+  if (document.startViewTransition && !reduced) document.startViewTransition(go); else go();
+}
 /* Radio tiles for picking a game; `name` keeps the home menu and the lobby picker apart. */
 function gameTiles(name, chosen, off) {
   return GAME_ORDER.filter(id => GAMES[id]).map(id => {
@@ -193,15 +220,24 @@ const XP = { round: 10, merged: 50, judged: 15, game: 40, victory: 150 };
 const STAT_KEYS = ["games", "wins", "merged", "judged", "cards", "lucky", "big"];
 let uid = null;                // the viewer's account id for this game, from the user capability
 let people = {};               // uid -> profile documents from the shared store (standings + anyone seated with you)
-let standings = [];            // top profiles by XP
+let standings = [];            // top profiles by total XP (also the source of legacy profiles, whose XP all came from CAH)
+const standingsBy = {};        // game id -> top profiles by that game's XP
 const asked = new Set();       // uids already fetched once
+/* Per-game progress: gx = { cah: {xp, wins, games}, mp: ..., sd: ..., gm: ... }. The total xp still sets the level.
+   Profiles from before gx existed earned everything in Cards Against Humanity, so their totals become their CAH line. */
+const GX_KEYS = ["xp", "wins", "games"];
+function cleanGx(d, xp, stats) {
+  const src = d.gx && typeof d.gx === "object" ? d.gx : { cah: { xp, wins: stats.wins, games: stats.games } }, out = {};
+  for (const g of GAME_ORDER) { out[g] = {}; for (const k of GX_KEYS) out[g][k] = Math.max(0, Math.floor(+((src[g] || {})[k]) || 0)); }
+  return out;
+}
 function cleanProfile(d, seed) {
   d = d || {};
-  const stats = {};
+  const stats = {}, xp = Math.max(0, Math.floor(+d.xp || 0));
   for (const k of STAT_KEYS) stats[k] = Math.max(0, Math.floor(+((d.stats || {})[k]) || 0));
   return {
     name: cleanName(d.name) || "", face: cleanFace(d.face, seed), img: validImg(d.img),
-    xp: Math.max(0, Math.floor(+d.xp || 0)), stats, awarded: Array.isArray(d.awarded) ? d.awarded.filter(x => typeof x === "string").slice(-200) : []
+    xp, stats, gx: cleanGx(d, xp, stats), awarded: Array.isArray(d.awarded) ? d.awarded.filter(x => typeof x === "string").slice(-200) : []
   };
 }
 let profile = (() => { try { return cleanProfile(JSON.parse(store.get("cah-profile", "null")), ME); } catch { return cleanProfile(null, ME); } })();
@@ -233,6 +269,8 @@ function applyRewards(data, rewards) {
     if (d.awarded.includes(r.id)) continue;
     d.xp += r.xp;
     for (const k of STAT_KEYS) d.stats[k] += r.stats[k] || 0;
+    const gx = d.gx[r.game || "cah"];
+    if (gx) { gx.xp += r.xp; gx.wins += r.stats.wins || 0; gx.games += r.stats.games || 0; }
     d.awarded = uniq(d.awarded.concat(r.marks, r.id)).slice(-200);
   }
   return d;
@@ -291,7 +329,7 @@ function adoptProfile(data) {
   syncedLook = profileLook(cleanProfile(data, ME));
   const d = firebaseAccountUser ? applyRewards(data, pendingRewards) : cleanProfile(data, ME);
   const behind = !firebaseAccountUser && d.xp < old.xp;
-  if (behind) { d.xp = old.xp; d.stats = old.stats; }
+  if (behind) { d.xp = old.xp; d.stats = old.stats; d.gx = old.gx; }
   if (!firebaseAccountUser) d.awarded = uniq(d.awarded.concat(old.awarded)).slice(-200);
   if (!d.name) d.name = old.name;
   profile = d;
@@ -302,19 +340,52 @@ function adoptProfile(data) {
 }
 const seatFields = () => ({ name: myName, face: profile.face, lvl: levelOf(profile.xp).lvl, uid, owner: firebaseAccountUser || uid });
 
+/* What a finished round pays you in each game: [xp, why] pairs. Returns null while the round has no result yet. */
+const ROUND_XP = {
+  cah(g, s) {
+    if (!g.winner || !g.order.length) return null;
+    const out = [], mine = g.order.find(o => o.pid === ME);
+    if (mine) { s.cards += mine.cards.length; out.push([XP.round, "Cards played"]); }
+    if (g.winner === ME) { s.merged++; if (g.randomWin) s.lucky++; out.push([XP.merged, g.randomWin ? "Won on the timer" : "Round won"]); }
+    if (g.czar === ME && !g.randomWin) { s.judged++; out.push([XP.judged, "Round judged"]); }
+    return out;
+  },
+  mp(g, s) {
+    const won = g.winner != null && g.order && g.order[g.winner];
+    if (!won) return null;
+    const out = [];
+    if (g.order.some(o => o.pid === ME)) out.push([XP.round, "Twist written"]);
+    if (won.pid === ME) { s.merged++; if (g.randomWin) s.lucky++; out.push([XP.merged, g.randomWin ? "Won on the timer" : "Round won"]); }
+    if (g.wisher === ME && !g.randomWin) { s.judged++; out.push([XP.judged, "Twist chosen"]); }
+    return out;
+  },
+  sd(g, s) {
+    const turn = g.turns && g.turns[g.round];
+    if (!turn) return null;
+    const out = [];
+    if (turn.pid === ME) out.push([XP.round, "Date survived"]);
+    else if (sdValue(g, ME, "rate") !== null) out.push([XP.round, "Date rated"]);
+    if ((g.cycleWinners || []).includes(ME)) { s.merged++; out.push([XP.merged, "Best date of the lap"]); }
+    return out;
+  },
+  gm(g, s) {
+    if (!Array.isArray(g.winners) || !g.order || !g.order.length) return null;
+    const out = [];
+    if (g.order.some(o => o.pid === ME)) out.push([XP.round, "GIF sent"]);
+    if (g.winners.some(k => g.order[k] && g.order[k].pid === ME)) { s.merged++; out.push([XP.merged, "Round won"]); }
+    if (g.setter === ME) { s.judged++; out.push([XP.judged, "Scene set"]); }
+    return out;
+  }
+};
 /* Each player credits only themselves, from what the lobby document shows, once per round and once per game. */
 function earn() {
-  const g = L && L.game;
-  if (!g || (g.type || "cah") !== "cah" || !g.seats || !g.seats.includes(ME) || (g.phase !== "result" && g.phase !== "over")) return;
+  const g = L && L.game, type = (g && g.type) || "cah";
+  if (!g || !ROUND_XP[type] || !g.seats || !g.seats.includes(ME) || (g.phase !== "result" && g.phase !== "over")) return;
   const before = clone(profile);
   const gains = [], s = profile.stats, lvl0 = levelOf(profile.xp).lvl;
   const mark = k => { const key = `${ME}:${g.gid}:${k}`; if (profile.awarded.includes(key)) return false; profile.awarded.push(key); return true; };
-  if (g.winner && g.order.length && mark(g.round)) {
-    const mine = g.order.find(o => o.pid === ME);
-    if (mine) { s.cards += mine.cards.length; gains.push([XP.round, "Cards played"]); }
-    if (g.winner === ME) { s.merged++; if (g.randomWin) s.lucky++; gains.push([XP.merged, g.randomWin ? "Won on the timer" : "Round won"]); }
-    if (g.czar === ME && !g.randomWin) { s.judged++; gains.push([XP.judged, "Round judged"]); }
-  }
+  const round = ROUND_XP[type](g, clone(s));
+  if (round && mark(g.round)) gains.push(...ROUND_XP[type](g, s));
   if (g.phase === "over" && mark("over")) {
     s.games++; if (g.seats.length >= 6) s.big++;
     gains.push([XP.game, "Game finished"]);
@@ -322,9 +393,11 @@ function earn() {
   }
   if (!gains.length) return;
   profile.awarded = profile.awarded.slice(-200);
-  profile.xp += gains.reduce((a, b) => a + b[0], 0);
+  const total = gains.reduce((a, b) => a + b[0], 0), gx = profile.gx[type];
+  profile.xp += total;
+  gx.xp += total; gx.wins += s.wins - before.stats.wins; gx.games += s.games - before.stats.games;
   if (firebaseAccountUser) {
-    pendingRewards.push({ id: "reward:" + rid(24), xp: profile.xp - before.xp,
+    pendingRewards.push({ id: "reward:" + rid(24), game: type, xp: profile.xp - before.xp,
       stats: Object.fromEntries(STAT_KEYS.map(k => [k, s[k] - before.stats[k]])),
       marks: profile.awarded.filter(k => !before.awarded.includes(k)) });
     cacheRewards();
@@ -495,6 +568,7 @@ function exitLobby(msg) {
   unsubLobby && unsubLobby(); unsubPlayers && unsubPlayers();
   unsubLobby = unsubPlayers = null;
   clearTimeout(nextTimer); nextKey = "";
+  if (L && L.settings && GAMES[L.settings.game] && L.settings.game !== homeGame) { homeGame = L.settings.game; tab.set("pg-game", homeGame); artFor = ""; }
   code = null; L = null; P = {}; view = "home";
   tab.set("cah-lobby", null);
   setPresence({ look: null });
@@ -772,7 +846,11 @@ const at = pid => `<strong>@${esc(nameOf(pid))}</strong>`;
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 function render() {
+  if (!code && view === "home" && !GAMES[homeGame]) view = "pick";
   const v = draft ? "profile" : !code ? view : (!L || L.status === "lobby") ? "lobby" : "game";
+  applyGame(v);
+  if (v !== "profile") { if (scanStream) stopScan(); if (!$("accountQrBox").hidden) setQrOpen(false); }
+  $("viewPick").hidden = v !== "pick";
   $("viewHome").hidden = v !== "home"; $("viewPacks").hidden = v !== "packs"; $("viewProfile").hidden = v !== "profile";
   $("viewLobby").hidden = v !== "lobby"; $("viewGame").hidden = v !== "game";
   $("leaveBtn").hidden = !code;
@@ -781,7 +859,8 @@ function render() {
   if (code) $("codeChip").innerHTML = `<span class="lbl">Lobby </span>${esc(code)}`;
   renderSync();
   renderTop();
-  if (v === "home") renderHome();
+  if (v === "pick") renderPick();
+  else if (v === "home") renderHome();
   else if (v === "packs") renderPacks();
   else if (v === "profile") renderProfile();
   else if (v === "lobby") renderLobby();
@@ -826,6 +905,8 @@ const ICONS = {
   list: ic(`<path d="M6 4h8M6 8h8M6 12h8"/><circle cx="2.8" cy="4" r=".6" fill="currentColor"/><circle cx="2.8" cy="8" r=".6" fill="currentColor"/><circle cx="2.8" cy="12" r=".6" fill="currentColor"/>`),
   eye: ic(`<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="2"/>`),
   sliders: ic(`<path d="M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7"/><circle cx="10.5" cy="4.5" r="1.5"/><circle cx="5.5" cy="11.5" r="1.5"/>`),
+  qr: ic(`<rect x="2" y="2" width="4.5" height="4.5"/><rect x="9.5" y="2" width="4.5" height="4.5"/><rect x="2" y="9.5" width="4.5" height="4.5"/><path d="M9.5 9.5h2v2M14 9.5v.01M9.5 14h.01M12 12v2h2"/>`),
+  scan: ic(`<path d="M2 5V3.5A1.5 1.5 0 0 1 3.5 2H5M11 2h1.5A1.5 1.5 0 0 1 14 3.5V5M14 11v1.5a1.5 1.5 0 0 1-1.5 1.5H11M5 14H3.5A1.5 1.5 0 0 1 2 12.5V11M4.5 8h7"/>`),
   chev: `<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 };
 // Static markup marks its icons with <i data-ic="name">
@@ -858,20 +939,21 @@ function renderRuler() {
       ${firebaseAccountUser ? `<button class="btn small" type="button" data-act="account-open">${ICONS.login}Connect devices</button>` : ""}</div>`;
 }
 
-function renderStandings() {
-  const list = standings.filter(d => d.xp > 0 || d.id === uid);
-  if (uid && !list.some(d => d.id === uid) && profile.xp > 0) list.push({ id: uid, ...profile });
-  list.sort((a, b) => b.xp - a.xp);
+function renderStandings(gid) {
+  const all = new Map();
+  for (const d of standings.concat(standingsBy[gid] || [])) all.set(d.id, d);
+  if (uid) all.set(uid, { id: uid, ...profile });
+  const list = [...all.values()].map(d => ({ ...d, g: d.gx[gid] })).filter(d => d.g.xp > 0).sort((a, b) => b.g.xp - a.g.xp);
   $("standings").innerHTML = !db ? `<li class="empty">Standings show up here once the game is connected.</li>`
     : list.length ? list.slice(0, 10).map((d, i) => {
       const me = d.id === uid, lvl = levelOf(d.xp).lvl;
       const look = me ? myLook() : { face: d.face, img: d.img, lvl };
       return `<li class="row std ${me ? "me" : ""} ${i < 3 ? `top${i + 1}` : ""}"><span class="rank-n">${i + 1}</span>${avHTML(look, "")}
         <span class="row-main"><span class="row-title">@${esc((me ? myName || "unnamed ruler" : d.name) || "unknown ruler")}${me ? " (you)" : ""}</span>
-          <span class="row-sub">${esc(rankOf(lvl))} · Level ${lvl} · ${plural(d.stats.wins, "victory", "victories")}</span></span>
-        <span class="xp-num">${d.xp.toLocaleString()} XP</span></li>`;
+          <span class="row-sub">${esc(rankOf(lvl))} · Level ${lvl} · ${plural(d.g.wins, "victory", "victories")}</span></span>
+        <span class="xp-num">${d.g.xp.toLocaleString()} XP</span></li>`;
     }).join("")
-    : `<li class="empty">Nobody has earned XP yet. Finish a game to claim the top spot.</li>`;
+    : `<li class="empty">Nobody has earned ${esc(GAMES[gid].name)} XP yet. Finish a game to claim the top spot.</li>`;
 }
 
 /* Personal codes are random bearer credentials. They never appear in public profile documents. */
@@ -887,7 +969,8 @@ function renderAccount() {
   $("accountPanel").hidden = !firebaseAccountUser;
   $("personalCode").value = formatAccountCode(personalCode);
   $("accountCopy").textContent = personalCode ? "Copy code" : "Get my code";
-  $("accountCopy").disabled = accountBusy || !canWrite;
+  $("accountCopy").disabled = $("accountQr").disabled = accountBusy || !canWrite;
+  $("accountScan").hidden = !("BarcodeDetector" in window) || !navigator.mediaDevices;
   $("accountConnect").disabled = accountBusy || !!code || !canWrite;
 }
 function accountError(e) {
@@ -912,7 +995,43 @@ async function bindProfile(id, replace = false) {
   }, dbErr);
   $("nameInput").value = $("renameInput").value = myName;
 }
-async function copyPersonalCode() {
+/* QR codes: the personal code as a link. A phone camera opens the game with the code filled in (#link=...),
+   and on browsers with a barcode reader the connect form can scan one directly. */
+const accountLink = () => `${location.origin}${location.pathname}#link=${formatAccountCode(personalCode)}`;
+const codeFromScan = text => {
+  const m = /#link=([A-Za-z0-9-]{24,29})$/.exec(String(text)), key = normalizeAccountCode(m ? m[1] : text);
+  return validAccountCode(key) ? key : null;
+};
+async function showAccountQr() {
+  if (!personalCode) return;
+  if (typeof qrcode !== "function") await loadScript("shared/qrcode.js");
+  const q = qrcode(0, "M"); q.addData(accountLink()); q.make();
+  $("accountQrBox").innerHTML = `<div class="qr">${q.createSvgTag({ cellSize: 4, margin: 3, scalable: true, alt: "QR code for your personal code" })}</div>
+    <p class="hint">Scan it with your other device's camera to open the game with this code filled in. Anyone who scans it can use your profile, so don't show it on stream.</p>`;
+  setQrOpen(true);
+}
+function setQrOpen(on) { $("accountQrBox").hidden = !on; $("accountQr").setAttribute("aria-expanded", on); if (!on) $("accountQrBox").innerHTML = ""; }
+let scanStream = null;
+function stopScan() { if (scanStream) scanStream.getTracks().forEach(t => t.stop()); scanStream = null; $("scanVideo").hidden = true; $("scanVideo").srcObject = null; }
+async function scanAccountQr() {
+  if (scanStream) return stopScan();
+  try {
+    const det = new BarcodeDetector({ formats: ["qr_code"] }), v = $("scanVideo");
+    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    v.srcObject = scanStream; v.hidden = false; await v.play();
+    accountMessage("Point the camera at the QR code on your other device.");
+    const look = async () => {
+      if (!scanStream) return;
+      const hits = await det.detect(v).catch(() => []);
+      const key = hits.map(h => codeFromScan(h.rawValue)).find(Boolean);
+      if (!key) return setTimeout(look, 250);
+      stopScan(); $("accountInput").value = formatAccountCode(key); $("accountConnect").focus();
+      accountMessage("Code scanned. Press Connect profile to switch this device to that profile.");
+    };
+    look();
+  } catch { stopScan(); accountMessage("Couldn't open the camera. Type the code instead."); }
+}
+async function copyPersonalCode(asQr = false) {
   if (!firebaseAccountUser || accountBusy) return;
   accountBusy = true; renderAccount();
   try {
@@ -932,6 +1051,7 @@ async function copyPersonalCode() {
       personalCode = link.code;
     }
     renderAccount();
+    if (asQr) return await showAccountQr();
     try { await navigator.clipboard.writeText(formatAccountCode(personalCode)); accountMessage("Copied. Enter this code in your profile on another device."); }
     catch { $("personalCode").focus(); $("personalCode").select(); accountMessage("Your code is ready. Select and copy it to use on another device."); }
   } catch (e) { accountError(e); }
@@ -1006,16 +1126,66 @@ function loadPicture(file) {
   im.src = url;
 }
 
-function renderHome() {
-  renderStandings();
-  if (!$("gameMenu").querySelector(`input[value="${homeGame}"]:checked`)) $("gameMenu").innerHTML = gameTiles("home-game", homeGame, false);
-  const off = !db || !canWrite;
-  $("createBtn").disabled = $("joinBtn").disabled = off;
+/* Open lobbies anyone can join; ones still waiting for players come first, ones nobody has open are hidden while they wait to be closed */
+function openLobbies() {
   const now = Date.now(), here = occupied();
-  /* lobbies still waiting for players come first; ones nobody has open are hidden while they wait to be closed */
-  const rows = directory.filter(d => /^[A-Z]{4}$/.test(d.id) && d.count > 0 && !d.private && now - (d.updated || 0) < STALE_MS
+  return directory.filter(d => /^[A-Z]{4}$/.test(d.id) && d.count > 0 && !d.private && now - (d.updated || 0) < STALE_MS
       && (!here || here.has(d.id) || now - (d.updated || 0) < EMPTY_MS))
     .sort((a, b) => (b.status === "lobby") - (a.status === "lobby"));
+}
+/* Each quarter's scene, drawn in markup and styled per game */
+const PICK_ART = {
+  cah: `<span class="pa-card b">Pick a game. ____.</span><span class="pa-card w">Horrible people.</span>`,
+  mp: () => `<span class="pa-slip"><em>I wish</em>I could pick every game.<i>Granted, but…</i>${typeof MP_SEAL === "string" ? MP_SEAL : ""}</span>`,
+  sd: `<span class="pa-date"><b>${ICONS.heart}</b><i>Tall</i><i>Owns 14 cats</i><i>Recently escaped</i><i class="q">?</i></span>`,
+  gm: `<span class="pa-gif"><span class="pa-play">GIF</span><span class="pa-cap">When the group chat goes quiet.</span><i></i><i></i><i></i><i></i></span>`
+};
+function renderPick() {
+  const counts = {};
+  for (const d of openLobbies()) counts[d.game || "cah"] = (counts[d.game || "cah"] || 0) + 1;
+  const html = GAME_ORDER.filter(id => GAMES[id]).map((id, i) => {
+    const g = GAMES[id], u = GAME_UI[id], n = counts[id] || 0, art = typeof PICK_ART[id] === "function" ? PICK_ART[id]() : PICK_ART[id];
+    return `<button class="pk g-${id}" type="button" data-pick="${id}" style="--i:${i}" aria-label="Play ${esc(g.name)}">
+      <span class="pk-art" aria-hidden="true">${art}</span>
+      <span class="pk-copy"><span class="pk-name">${u.title}<b>.</b></span><span class="pk-pitch">${u.pitch}</span>
+        <span class="pk-meta"><span>${ICONS.users}${g.min}+ players</span>${n ? `<span class="pk-live"><i></i>${plural(n, "open lobby", "open lobbies")}</span>` : ""}</span></span></button>`;
+  }).join("");
+  if ($("pickGrid").dataset.h !== html) { $("pickGrid").innerHTML = html; $("pickGrid").dataset.h = html; }
+}
+/* Home's art beside the form: the picked game's own thing, dealt again on click */
+let artFor = "";
+const pickOne = a => a[Math.floor(Math.random() * a.length)];
+function dealArt() {
+  const id = homeGame, lang = "en";
+  if (id === "cah") { $("heroCards").className = "deal-cards"; return dealHero(); }
+  let html = "";
+  if (id === "mp" && typeof MP_WISHES === "object") {
+    html = `<span class="ha-slip back">Granted, but…</span><span class="ha-slip"><em>I wish</em>${esc(pickOne(MP_WISHES[lang]).replace(/^I wish\s*/i, ""))}${typeof MP_SEAL === "string" ? MP_SEAL : ""}</span>`;
+  } else if (id === "sd" && typeof SD_TRAITS === "object") {
+    const pool = SD_TRAITS[lang], cats = shuffle(Object.keys(pool)).slice(0, 4);
+    html = `<span class="ha-date"><span class="ha-date-head">${ICONS.heart}<b>Your date</b></span>${cats.map((c, i) => `<i style="--d:${i}">${esc(pickOne(pool[c]))}</i>`).join("")}</span>`;
+  } else if (id === "gm" && typeof GM_SITUATIONS === "object") {
+    html = `<span class="ha-gif"><span class="ha-sit">${esc(pickOne(GM_SITUATIONS[lang]))}</span><span class="ha-frame"><span class="pa-play">GIF</span><i></i><i></i><i></i><i></i></span></span>`;
+  }
+  $("heroCards").className = `deal-cards art-${id}`;
+  $("heroCards").innerHTML = html;
+  const d = $("heroDeal");
+  d.classList.remove("fresh"); void d.offsetWidth; d.classList.add("fresh");
+}
+function renderHome() {
+  const gid = GAMES[homeGame] ? homeGame : "cah", u = GAME_UI[gid];
+  renderStandings(gid);
+  if (artFor !== gid) {
+    artFor = gid;
+    $("homeTitle").innerHTML = `${u.title}<span>.</span>`;
+    $("homeTagline").textContent = `${u.pitch} ${GAMES[gid].min} to ${MAX_PLAYERS} players.`;
+    $("packsLink").hidden = gid !== "cah";
+    $("standTitle").innerHTML = `${ICONS.trophy}${esc(GAMES[gid].name)} standings`;
+    dealArt();
+  }
+  const off = !db || !canWrite;
+  $("createBtn").disabled = $("joinBtn").disabled = off;
+  const rows = openLobbies().filter(d => (d.game || "cah") === gid);
   $("lobbyCount").hidden = !db || !rows.length;
   $("lobbyCount").textContent = `${rows.length} open`;
   $("lobbyList").innerHTML = !db
@@ -1031,7 +1201,7 @@ function renderHome() {
             <span class="seats" role="img" aria-label="${d.count} of ${max} players">${pips}<b>${d.count}/${max}</b></span></span></span>
         <span class="row-actions"><button class="btn small ${waiting && !full ? "primary" : ""}" type="button" data-join="${d.id}" ${off || full ? "disabled" : ""}>${full ? "Full" : `${ICONS.login}Join`}</button></span></li>`;
     }).join("")
-    : `<li class="lobby-empty"><strong>No open lobbies right now.</strong>Create one and send the code to your friends.</li>`;
+    : `<li class="lobby-empty"><strong>No open ${esc(GAMES[gid].name)} lobbies right now.</strong>Create one and send the code to your friends.</li>`;
 }
 
 function renderPacks() {
@@ -1070,9 +1240,11 @@ function renderLobby() {
     return `<li class="seat ${pid === ME ? "me" : ""} ${away ? "away" : ""}">${avHTML(look, "md")}
       <span class="row-main"><span class="row-title" title="@${esc(P[pid].name || "player")}">@${esc(P[pid].name || "player")}</span>
         <span class="row-sub"><span class="dot ${away ? "off" : ""}"></span>${away ? "Away" : esc(rankOf(look.lvl))}</span></span>
-      <span class="seat-badges">${pid === L.host ? `<span class="chip won">Host</span>` : ""}${pid === ME ? `<span class="chip">You</span>` : ""}
+      <span class="seat-badges">${pid === L.host ? `<span class="chip won">Host</span>` : ""}${pid === ME ? `<span class="chip">You</span>` : ""}${/^pbot/.test(pid) ? `<span class="chip">Bot</span>` : ""}
         ${host && pid !== ME ? `<button class="btn small danger icon" type="button" data-kick="${pid}" data-tip="Remove from lobby" aria-label="Remove @${esc(P[pid].name || "player")}">${ICONS.x}</button>` : ""}</span></li>`;
-  }).join("") + Array.from({ length: Math.max(0, settings().maxPlayers - ids.length) }, (_, i) => `<li class="seat vacant"><span class="seat-number">${ids.length + i + 1}</span>Open seat</li>`).join("");
+  }).join("") + Array.from({ length: Math.max(0, settings().maxPlayers - ids.length) }, (_, i) => !i && host && window.BOTS
+    ? `<li class="seat vacant"><button class="add-bot" type="button" data-act="add-bot" data-tip="Test bot, only on this computer"><span class="seat-number">${ICONS.plus}</span>Add a bot</button></li>`
+    : `<li class="seat vacant"><span class="seat-number">${ids.length + i + 1}</span>Open seat</li>`).join("");
 
   const s = settings(), chosen = new Set(s.packs || []), off = host ? "" : "disabled";
   const all = allPacks(), counts = deckCounts([...chosen]);
@@ -1228,6 +1400,8 @@ document.addEventListener("click", e => {
     db.doc("packs/" + id).delete().then(() => notice("Pack deleted.")).catch(writeError);
     return;
   }
+  const pk = t.closest("[data-pick]");
+  if (pk) return pickGame(pk.dataset.pick);
   const fc = t.closest("[data-face]");
   if (fc && draft) { draft.face[fc.dataset.face] = +fc.dataset.val; draft.img = null; return renderProfile(); }
   const a = t.closest("[data-act]");
@@ -1237,6 +1411,8 @@ document.addEventListener("click", e => {
   else if (act === "toggle-theme") setMenu(menuOpen === "theme" ? null : "theme");
   else if (act === "account-open") { setMenu(null); openProfile(); $("accountPanel").scrollIntoView({ behavior: "smooth", block: "center" }); }
   else if (act === "account-copy") copyPersonalCode();
+  else if (act === "account-qr") $("accountQrBox").hidden ? copyPersonalCode(true) : setQrOpen(false);
+  else if (act === "account-scan") scanAccountQr();
   else if (act === "open-profile") { setMenu(null); openProfile(); }
   else if (act === "pf-save" && draft) saveRuler();
   else if (act === "pf-cancel") { draft = null; render(); }
@@ -1250,7 +1426,9 @@ document.addEventListener("click", e => {
   else if (act === "leave") leaveLobby();
   else if (act === "resync") resync(true);
   else if (act === "copy-code") copyCode();
-  else if (act === "deal") dealHero();
+  else if (act === "deal") dealArt();
+  else if (act === "pick-game") pickGame("");
+  else if (act === "add-bot" && window.BOTS) BOTS.add();
   else if (act === "start") startGame();
   else if (act === "take-over") maybeTakeOver(true);
   else if (act === "submit") submitCards();
@@ -1262,7 +1440,6 @@ document.addEventListener("click", e => {
   else if (act === "skip" && isHost() && piled(L.game)) { skipRound(L.game, "The host skipped this round."); commit(); }
   else if (act === "end" || act === "again") backToLobby();
 });
-document.addEventListener("change", e => { if (e.target.dataset.homeGame !== undefined) homeGame = e.target.value; });
 document.addEventListener("change", e => {
   if (!isHost() || L.status !== "lobby") return;
   const key = e.target.dataset.setting;
@@ -1357,8 +1534,9 @@ async function firebaseBackend() {
 }
 
 /* ---------- boot ---------- */
+const linkHash = /^#link=([A-Za-z0-9-]{24,29})$/.exec(location.hash);
+if (linkHash) history.replaceState(null, "", location.pathname + location.search);   // keep the code out of the address bar and history
 async function boot() {
-  dealHero();
   $("nameInput").value = myName;
   render();
   const use = name => window.claude && window.claude.use ? window.claude.use(name).catch(() => null) : Promise.resolve(null);
@@ -1401,6 +1579,11 @@ async function boot() {
     for (const d of s.docs) people[d.id] = d.data();
     render();
   }, () => {});
+  for (const g of GAME_ORDER) db.collection("profiles").orderBy(`gx.${g}.xp`, "desc").limit(50).onSnapshot(s => {
+    standingsBy[g] = s.docs.map(d => ({ id: d.id, ...cleanProfile(d.data(), d.id) }));
+    for (const d of s.docs) people[d.id] = d.data();
+    if (!code) render();
+  }, () => {});
   db.collection("packs").onSnapshot(s => {
     packs = {};
     for (const doc of s.docs) packs[doc.id] = doc.data();
@@ -1413,6 +1596,16 @@ async function boot() {
   }, dbErr);
   setInterval(() => { tick(); closeEmptyLobbies(); }, 1000);
 
+  const linked = linkHash && codeFromScan(linkHash[1]);
+  if (linked && firebaseAccountUser) {
+    if (linked === personalCode) notice("This device already uses that profile.");
+    else {
+      openProfile(); $("accountInput").value = formatAccountCode(linked);
+      accountMessage("Code from your other device filled in. Press Connect profile to switch this device to that profile.");
+      $("accountPanel").scrollIntoView({ block: "center" });
+      return;
+    }
+  }
   /* come back to the lobby this browser was in before a reload */
   const saved = tab.get("cah-lobby", null);
   if (saved && /^[A-Z]{4}$/.test(saved) && canWrite) {

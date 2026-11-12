@@ -49,7 +49,7 @@ function sdStartRound(g) {
   const speaker = unplayed.find(pid => g.speaker && P[g.speaker] ? pid !== g.speaker && byJoined(pid, g.speaker) > 0 :
     (P[pid].joined || 0) > prev || ((P[pid].joined || 0) === prev && pid > g.speaker)) || unplayed[0];
   Object.assign(g, { seats, speaker, speakerJoined: P[speaker].joined || 0, round: g.round + 1, phase: "write", traits: [], startAt: 0,
-    count: sdNum(s.sdCount, 8), every: sdNum(s.sdEvery, 5), deadline: s.sdWrite === 0 ? 0 : sdNow() + sdNum(s.sdWrite, 40) * 1000, cycleWinners: [] });
+    count: sdNum(s.sdCount, 8), every: sdNum(s.sdEvery, 8), deadline: s.sdWrite === 0 ? 0 : sdNow() + sdNum(s.sdWrite, 40) * 1000, cycleWinners: [] });
   for (const pid of seats) {
     g.scores[pid] ??= 0; g.names[pid] = P[pid].name; g.faces[pid] = P[pid].face || null;
   }
@@ -58,27 +58,28 @@ function sdSkipRound(g, why) {
   g.log.unshift({ h: "R" + g.round, who: null, what: why }); g.log = g.log.slice(0, 7);
   sdStartRound(g);
 }
+/* Every date runs the same order, so the table always knows what comes next: the deck categories,
+   then the table's own traits, then the twist to close. A short date drops the tail of the deck order. */
+const SD_ORDER = ["gender", "age", "height", "weight", "job", "loves", "looks", "habit", "secret", "redflag", "relation"];
+const SD_TAGS = { gender: "Gender", age: "Age", height: "Height", weight: "Weight", job: "Job", loves: "Loves", looks: "Looks", habit: "Habit",
+  secret: "Secret", redflag: "Red flag", relation: "Relation", dealbreaker_twist: "Twist", player: "From the table" };
+const sdTag = cat => SD_TAGS[cat] || "Trait";
+function sdLineup(g, players, pool = sdPool()) {
+  const has = cat => Array.isArray(pool[cat]) && pool[cat].some(t => typeof t === "string" && t.trim());
+  const twist = g.count >= 4 && has("dealbreaker_twist") ? ["dealbreaker_twist"] : [];
+  players = Math.min(players, Math.max(0, Math.min(Math.floor(g.count / 3), g.count - 3 - twist.length)));
+  return [...SD_ORDER.filter(has).slice(0, g.count - players - twist.length), ...Array(players).fill("player"), ...twist];
+}
 function sdBuildTraits(g) {
-  const pool = sdPool(), used = new Set(), traits = [], fixed = ["gender", "age", "height"];
-  const written = shuffle(sdListeners(g).map(pid => ({ text: sdValue(g, pid, "trait"), cat: "player", by: pid })).filter(t => t.text));
-  const players = [];
-  const values = cat => Array.isArray(pool[cat]) ? pool[cat].filter(t => typeof t === "string" && t.trim() && !used.has(t.trim())).map(t => t.trim()) : [];
-  const draw = cat => {
-    const text = shuffle(values(cat))[0];
-    if (!text) return false;
-    used.add(text); traits.push({ text, cat, by: null }); return true;
-  };
-  for (const cat of fixed.slice(0, g.count)) draw(cat);
-  for (const t of written) {
-    if (players.length >= Math.min(Math.floor(g.count / 2), Math.max(0, g.count - 3))) break;
+  const pool = sdPool(), used = new Set(), traits = [], players = [];
+  for (const t of shuffle(sdListeners(g).map(pid => ({ text: sdValue(g, pid, "trait"), cat: "player", by: pid })).filter(t => t.text)))
     if (!used.has(t.text)) { used.add(t.text); players.push(t); }
+  const values = cat => Array.isArray(pool[cat]) ? pool[cat].filter(t => typeof t === "string" && t.trim() && !used.has(t.trim())).map(t => t.trim()) : [];
+  for (const cat of sdLineup(g, players.length, pool)) {
+    if (cat === "player") { traits.push(players.shift()); continue; }
+    const text = shuffle(values(cat))[0];
+    if (text) { used.add(text); traits.push({ text, cat, by: null }); }
   }
-  const cats = Object.keys(pool).filter(cat => !fixed.includes(cat));
-  for (const cat of shuffle(cats)) { if (traits.length >= g.count - players.length) break; draw(cat); }
-  /* A small pool makes a shorter date; never repeat a deck category. */
-  for (const t of players) traits.splice(Math.min(3, traits.length) + Math.floor(Math.random() * (Math.max(0, traits.length - 3) + 1)), 0, t);
-  const twist = traits.findIndex(t => t.cat === "dealbreaker_twist");
-  if (twist >= 0) traits.push(...traits.splice(twist, 1));
   return traits;
 }
 function sdFinishTurn(g) {
@@ -155,10 +156,10 @@ function sdNextIn(g) {
   const next = sdNextAt(g);
   return next && !sdCount(g) ? Math.max(1, Math.ceil((next - sdNow()) / 1000)) : 0;
 }
-/* The traits so far as tags; the ones still to come as empty slots. */
-function sdChips(g, upto, slots, after) {
+/* The traits so far as tags; the ones still to come as slots naming what they will be. */
+function sdChips(g, upto, todo, after) {
   return `<ul class="sd-chips">${g.traits.slice(0, upto).map(t => `<li class="${t.by ? "own" : ""}">${t.by ? ICONS.pencil : ""}${esc(t.text)}${after && t.by
-    ? `<span class="sd-by">${avHTML(lookOf(t.by), "sm", false)}@${esc(nameOf(t.by))}</span>` : ""}</li>`).join("")}${Array.from({ length: slots }, () => `<li class="todo" aria-hidden="true"></li>`).join("")}</ul>`;
+    ? `<span class="sd-by">${avHTML(lookOf(t.by), "sm", false)}@${esc(nameOf(t.by))}</span>` : ""}</li>`).join("")}${todo.map(cat => `<li class="todo">${esc(sdTag(cat))}</li>`).join("")}</ul>`;
 }
 /* Game over: the champion takes the spotlight */
 function sdCrown(g) {
@@ -176,22 +177,22 @@ function sdSet(g, n, act = "") {
   const head = `<header class="sd-spot">${avHTML(lookOf(sp), "lg", false)}<div><span class="sd-air"><i></i>${air}</span>
     <b>${sp === ME ? "You" : `@${esc(nameOf(sp))}`}</b></div><span class="sd-no">Date ${g.round}</span></header>`;
   let body = "";
-  if (phase === "write") body = `<p class="sd-meta">${total} traits, one every ${g.every}s</p>${sdChips(g, 0, total)}`;
+  if (phase === "write") body = `<p class="sd-meta">${total} traits, one every ${g.every}s</p>${sdChips(g, 0, sdLineup(g, sdListeners(g).filter(pid => sdValue(g, pid, "trait")).length))}`;
   else if (phase === "reveal") {
     const t = g.traits[n - 1], flip = !cd && n !== sdShown;
     sdShown = cd ? -1 : n;
     const next = sdNextIn(g), since = next ? g.every * 1000 - (sdNextAt(g) - sdNow()) : 0;
     body = cd ? `<div class="sd-now count"><b>${cd}</b><span>${sp === ME ? "Start talking on zero" : "Going live"}</span></div>`
-      : `<div class="sd-now${flip ? " flip" : ""}"><span class="sd-k">${sdPad(n)}<small>/${sdPad(total)}</small></span>
+      : `<div class="sd-now${flip ? " flip" : ""}"><span class="sd-k">${sdPad(n)}<small>/${sdPad(total)}</small><em>${esc(sdTag(t.cat))}</em></span>
         <p class="sd-trait${t.text.length > 28 ? " long" : ""}">${esc(t.text)}</p>${t.by ? `<span class="sd-from">${ICONS.pencil}Written by someone here</span>` : ""}</div>
-        ${next ? `<div class="sd-next" aria-hidden="true"><span class="bar"><i style="--dur:${g.every}s;--since:-${Math.max(0, since)}ms"></i></span><span>Next in <b>${next}</b></span></div>`
+        ${next ? `<div class="sd-next" aria-hidden="true"><span class="bar"><i style="--dur:${g.every}s;--since:-${Math.max(0, since)}ms"></i></span><span>Next <em>${esc(sdTag(g.traits[n].cat))}</em> in <b>${next}</b></span></div>`
         : `<div class="sd-next last"><span>Last one. Bring it home.</span></div>`}`;
-    body += sdChips(g, cd ? 0 : n - 1, cd ? total : total - n);
+    body += sdChips(g, cd ? 0 : n - 1, g.traits.slice(cd ? 0 : n).map(t => t.cat));
   } else {
     const turn = g.turns[g.round];
     if (after && turn && turn.pid === sp) body = turn.avg === null ? `<div class="sd-score none"><b>-</b><em>Nobody rated</em></div>`
       : `<div class="sd-score"><b>${turn.avg.toFixed(1)}</b><span>/5</span><em>${sdWord(turn.avg)}</em><small>${plural(turn.n, "rating", "ratings")}</small></div>`;
-    body += act + sdChips(g, g.traits.length, 0, after);
+    body += act + sdChips(g, g.traits.length, [], after);
   }
   if (phase !== "reveal") sdShown = -1;
   return `<article class="sd-set ${phase}">${head}${body}</article>`;
@@ -241,7 +242,7 @@ function sdRender(g) {
   let title = "", hint = "", body = "", action = "", idle = false;
   if (phase === "write" && role === "listener") {
     title = myT ? "Your trait" : "Your secret trait";
-    hint = myT ? "Sent. If it's picked, it drops after the first three." : "One short trait. It drops after the first three.";
+    hint = myT ? "Sent. If it's picked, it drops in near the end, before the twist." : "One short trait. It drops in near the end, before the twist.";
     if (myT) body = `<p class="sd-mine">${ICONS.pencil}${esc(myT)}</p>`;
     else {
       body = composer("sdForm", key, "Your date", "still lives with their ex", 60);
@@ -284,7 +285,7 @@ document.addEventListener("submit", e => {
 /* The rating countdown: a recording light, in the show's neon */
 const sdClock = () => `<svg class="sd-clock" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".45"/><circle cx="12" cy="12" r="5" fill="currentColor"/></svg>`;
 GAMES.sd = {
-  id: "sd", name: "Speed Date", min: 2, defaults: { sdCount: 8, sdEvery: 5, sdWrite: 40 },
+  id: "sd", name: "Speed Date", min: 2, defaults: { sdCount: 8, sdEvery: 8, sdWrite: 40 },
   check: sdCheck, start: sdStart, tick: sdTick, render: sdRender, clock: sdClock,
   next: g => sdStartRound(g), skip: g => sdSkipRound(g, "The host skipped this date.")
 };

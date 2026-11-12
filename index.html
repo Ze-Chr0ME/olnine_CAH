@@ -5,7 +5,7 @@
 <meta name="description" content="A multiplayer party game in the style of Cards Against Humanity, with the official card packs, custom packs, ruler portraits and XP.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=IBM+Plex+Mono:wght@400;500;600&family=IM+Fell+English:ital@0;1&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=IBM+Plex+Mono:wght@400;500;600&family=IM+Fell+English:ital@0;1&family=Fraunces:ital,opsz,wght@1,9..144,600..900&display=swap">
 <meta name="theme-color" content="#0f1116">
 <script>
 /* Apply the saved theme before first paint so a light-theme player never sees a dark flash (or the reverse) */
@@ -14,6 +14,8 @@
   try { t = localStorage.getItem("cah-theme") || "dark"; } catch (e) {}
   if (t === "system") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   document.documentElement.setAttribute("data-theme", t);
+  /* the game this tab last picked sets the page's look before first paint too */
+  try { var g = sessionStorage.getItem("pg-game"); if (/^(cah|mp|sd|gm)$/.test(g || "")) document.documentElement.setAttribute("data-game", g); else document.documentElement.setAttribute("data-game", "hub"); } catch (e) {}
 })();
 </script>
 <link rel="stylesheet" href="shared/style.css">
@@ -21,7 +23,7 @@
 <div class="app">
   <header class="topbar">
     <div class="brand">
-      <h1 class="mark">Party<br>Games.</h1>
+      <h1 id="mark" class="mark">Party<br>Games.</h1>
     </div>
     <div class="top-right">
       <span id="victories" class="victories"></span>
@@ -44,14 +46,20 @@
 
   <p id="notice" class="notice" role="status" hidden></p>
 
+  <!-- Game picker: one quarter of the screen per game -->
+  <main id="viewPick" class="picker" hidden aria-labelledby="pickTitle">
+    <h2 id="pickTitle" class="pick-badge"><span>Party<br>Games<b>.</b></span><small>Pick a game</small></h2>
+    <div id="pickGrid" class="pick-grid"></div>
+  </main>
+
   <!-- Home: title screen, then who is playing and who is winning -->
   <main id="viewHome" class="home" hidden>
     <section class="home-hero" aria-labelledby="homeTitle">
       <div class="hero-copy">
+        <button class="btn small back-games" type="button" data-act="pick-game"><i data-ic="arrowL"></i>All games</button>
         <h2 id="homeTitle">Party<br>Games<span>.</span></h2>
-        <p class="hero-tagline">Three galactic party games for horrible people. 2 to 20 players.</p>
+        <p id="homeTagline" class="hero-tagline"></p>
         <form id="startForm" class="play" autocomplete="off">
-          <div id="gameMenu" class="game-tiles" role="radiogroup" aria-label="Game"></div>
           <div class="field">
             <label for="nameInput">Your name</label>
             <input id="nameInput" maxlength="20" spellcheck="false" placeholder="e.g. warlord_wendy">
@@ -64,7 +72,7 @@
             </div>
           </div>
         </form>
-        <button class="link" type="button" data-act="open-packs"><i data-ic="cards"></i>Browse and write card packs</button>
+        <button id="packsLink" class="link" type="button" data-act="open-packs"><i data-ic="cards"></i>Browse and write card packs</button>
       </div>
       <div id="heroDeal" class="deal" data-act="deal" title="Deal another" aria-hidden="true">
         <div id="heroCards" class="deal-cards"></div>
@@ -75,7 +83,7 @@
       <ul id="lobbyList" class="rows"></ul>
     </section>
     <section class="panel leaderboard">
-      <div class="panel-head"><h2 class="ptitle"><i data-ic="trophy"></i>Galactic standings</h2></div>
+      <div class="panel-head"><h2 id="standTitle" class="ptitle"><i data-ic="trophy"></i>Standings</h2></div>
       <ol id="standings" class="rows"></ol>
     </section>
   </main>
@@ -120,11 +128,15 @@
       <div class="inline">
         <div class="field"><label for="personalCode">Your personal code</label><input id="personalCode" class="account-code" readonly placeholder="Get your code below" aria-describedby="accountMsg"></div>
         <button id="accountCopy" class="btn" type="button" data-act="account-copy">Get my code</button>
+        <button id="accountQr" class="btn icon" type="button" data-act="account-qr" data-tip="Show as QR code" aria-label="Show your code as a QR code" aria-expanded="false" aria-controls="accountQrBox"><i data-ic="qr"></i></button>
       </div>
+      <div id="accountQrBox" class="qr-box" hidden></div>
       <form id="accountForm" class="inline" autocomplete="off">
         <div class="field"><label for="accountInput">Connect to an existing profile</label><input id="accountInput" class="account-code" maxlength="29" spellcheck="false" autocapitalize="characters" autocomplete="off" placeholder="XXXXXX-XXXXXX-XXXXXX-XXXXXX"></div>
+        <button id="accountScan" class="btn icon" type="button" data-act="account-scan" data-tip="Scan a QR code" aria-label="Scan a QR code with the camera" hidden><i data-ic="scan"></i></button>
         <button id="accountConnect" class="btn primary" type="submit">Connect profile</button>
       </form>
+      <video id="scanVideo" class="scan-video" muted playsinline hidden></video>
       <p class="hint">Connecting replaces the profile shown on this device; it does not merge two profiles. Leave your lobby before switching.</p>
       <p id="accountMsg" class="hint" role="status"></p>
     </section>
@@ -237,4 +249,8 @@
 <script src="gif-me/situations.js"></script>
 <script src="gif-me/gm.js"></script>
 <script src="gif-me/gm-ui.js"></script>
+<script>
+/* Test bots: only when the page is served from this computer, never on the published site */
+if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) document.write('<script src="dev/bots.js"><\/script>');
+</script>
 <script>boot();</script>
